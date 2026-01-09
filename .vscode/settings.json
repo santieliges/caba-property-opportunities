@@ -1,0 +1,5 @@
+{
+    "editor.unicodeHighlight.includeComments": true,
+    "editor.unicodeHighlight.nonBasicASCII": true,
+    "terminal.integrated.enableImages": true
+}
