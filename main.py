@@ -42,7 +42,7 @@ from sync.sync import Synchronizer
 
 ####################### Datos Venta ##########################
 
-scraper = VentaScrapper(headless=True, url_base="https://www.argenprop.com/casas-o-departamentos-o-ph/venta/capital-federal")
+scraper = VentaScrapper(headless=True, url_base="https://www.argenprop.com/casas-o-departamentos-o-ph/venta/capital-federal/dolares-desde-20000?orden-menorprecio")
 scraper.run()
 all_data = scraper.extract_all_pages(n_pages=99)
 
