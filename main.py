@@ -42,9 +42,9 @@ from sync.sync import Synchronizer
 
 ####################### Datos Venta ##########################
 
-scraper = VentaScrapper(headless=True, url_base="https://www.argenprop.com/casas-o-departamentos-o-ph/venta/capital-federal?orden-masnuevos")
+scraper = VentaScrapper(headless=True, url_base="https://www.argenprop.com/casas-o-departamentos-o-ph/venta/capital-federal")
 scraper.run()
-all_data = scraper.extract_all_pages(n_pages=2)
+all_data = scraper.extract_all_pages(n_pages=99)
 
 storage_path = "storage/arg_venta_data.csv"
 storage = CSVStorage(storage_path)
