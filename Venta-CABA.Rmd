@@ -1,0 +1,27 @@
+---
+title: "Venta-CABA"
+author: "Santiago Eliges"
+date: "2026-01-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(sf)
+```
+
+
+
+```{r cars}
+df <- read.csv('storage/arg_venta_data.csv')
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
