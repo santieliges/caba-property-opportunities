@@ -60,6 +60,7 @@ class Synchronizer:
             if hasattr(self.storage.get_all(), "index") \
             else None
 
+    
     def update_entry(self, entry_id):
         data = self.storage.get_all()
         entry = data.loc[entry_id]
