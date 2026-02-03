@@ -28,6 +28,7 @@ class InmuebleData:
     estado: Optional[str] = None
     disposicion: Optional[str] = None
     orientacion: Optional[str] = None
+    cocheras: Optional[int] = None
 
     latitud: Optional[float] = None
     longitud: Optional[float] = None
@@ -190,6 +191,7 @@ class Scrapper:
             "estado": features.get("estado"),
             "disposicion": features.get("disposicion"),
             "orientacion": features.get("orientacion"),
+            "cocheras": features.get("cant. cocheras"),
             "estado_edificio": edificio.get("estado edificio"),
             "tipo_unidad": datos_basicos.get("tipo de unidad"),
             "latitud": lat,

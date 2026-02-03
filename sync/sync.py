@@ -1,7 +1,9 @@
 import pandas as pd
 from storage.storage import Storage
 from scrapper.Scrapper import Scrapper
+from scrapper.Scrapper import InmuebleData
 from datetime import datetime
+
 class Synchronizer:
     def __init__(self, storage: Storage, scrapper: Scrapper):
         self.storage = storage
@@ -57,6 +59,30 @@ class Synchronizer:
             return self.storage.get_all().index \
             if hasattr(self.storage.get_all(), "index") \
             else None
+
+    def update_entry(self, entry_id):
+        data = self.storage.get_all()
+        entry = data.loc[entry_id]
+        url = entry.get("url", None)
+        if url:
+            has_error_410 = self.scrapper.check_url_change(url)
+            if has_error_410:
+                self.storage.close(entry_id, valid_to = datetime.now())
+            else:
+                try:
+                    detail = self.extract_detail_data(url)
+
+                    data_actualizada = InmuebleData(
+                        id=entry_id,
+                        url=url,
+                        image_url=entry.get("image_url"),
+                        imagen_path=entry.get("imagen_path"),
+                        **detail,
+                    )
+
+                except Exception as e:
+                    print(f"Error en {entry['url']}: {e}")
+        self.storage.update(entry_id, data_actualizada.to_dict())
 
     def close_endend_urls(self):
         data = self.storage.get_all()

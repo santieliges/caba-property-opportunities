@@ -19,15 +19,15 @@ class Storage(ABC):
         pass
 
     @abstractmethod
-    def insert(self, entry: dict):
+    def insert(self, entry: dict,  valid_from):
         pass
 
     @abstractmethod
-    def update(self, entry_id, entry: dict):
+    def update(self, entry_id, entry: dict, valid_from):
         pass
 
     @abstractmethod
-    def delete(self, entry_id):
+    def delete(self, entry_id, valid_to):
         pass
 
     @abstractmethod
@@ -35,7 +35,7 @@ class Storage(ABC):
         pass
 
     @abstractmethod
-    def close(self, old_entry, valid_to):
+    def close(self, entry_id, valid_to):
         pass
     @abstractmethod
     def apply_to_column(self, column, func):
@@ -63,11 +63,19 @@ class CSVStorage(Storage):
 
     def load(self):
         if self.path.exists():
-            return pd.read_csv(self.path).set_index("id")
+            return pd.read_csv(
+                self.path,
+                parse_dates=["valido_desde", "valido_hasta"]
+            ).set_index("idx")
         else:
             df = pd.DataFrame()
-            df.index.name = "id"
+            df.index.name = "idx"
             return df
+
+    def _next_idx(self) -> int:
+        if self.df.empty:
+            return 1
+        return int(self.df.index.max()) + 1
 
     def save(self, new_path: str = None):
         if new_path:
@@ -77,47 +85,55 @@ class CSVStorage(Storage):
     def get_all(self) -> pd.DataFrame:
         return self.df.copy()
 
-    def get_by_id(self, entry_id):
-        if entry_id in self.df.index:
-            return self.df.loc[entry_id]
-        return None
+    def get_by_id(self, entry_id, only_active=True):
+        mask = self.df["id"] == entry_id
+        if only_active:
+            mask &= self.df["valido_hasta"].isna()
+        return self.df.loc[mask].copy()
 
     def exists(self, entry_id) -> bool:
-        return entry_id in self.df.index
+        return (
+            (self.df["id"] == entry_id) &
+            (self.df["valido_hasta"].isna())
+        ).any()
 
-    def insert(self, entry: dict, valid_from, entry_id=None):
+
+    def insert(self, entry: dict, valid_from):
         entry = entry.copy()
         entry["valido_desde"] = valid_from
         entry["valido_hasta"] = pd.NaT
 
-        # CASO INICIAL: df sin columnas
-        if self.df.empty and len(self.df.columns) == 0:
-            self.df = (
-                pd.DataFrame([entry])
-                .set_index("id")
-            )
-        else:
-            self.df.loc[entry_id, entry.keys()] = list(entry.values())
-
+        idx = self._next_idx()
+        self.df.loc[idx, entry.keys()] = entry.values()
 
 
     def close(self, entry_id, valid_to):
+        mask = (
+            (self.df["id"] == entry_id) &
+            (self.df["valido_hasta"].isna())
+        )
+        self.df.loc[mask, "valido_hasta"] = valid_to
 
-        if "valido_hasta" not in self.df.columns:
-            self.df["valido_hasta"] = pd.NaT
+    def update(self, entry_id, updates: dict, valid_from):
+        mask_current = (
+            (self.df["id"] == entry_id) &
+            (self.df["valido_hasta"].isna())
+        )
 
-        self.df.at[entry_id, "valido_hasta"] = valid_to
+        if not mask_current.any():
+            raise ValueError(f"No existe registro activo para id={entry_id}")
 
+        old_entry = self.df.loc[mask_current].iloc[0]
 
+        # cerrar versión anterior
+        self.df.loc[mask_current, "valido_hasta"] = valid_from
+        new_entry = old_entry.to_dict()
+        new_entry.update(updates)
+        self.insert(new_entry, valid_from)
 
-    def update(self, entry_id, updates: dict):
-        for col, val in updates.items():
-            self.df.loc[entry_id, col] = val
+    def delete(self, entry_id, valid_to):
+        self.close(entry_id, valid_to)
 
-
-    def delete(self, entry_id):
-        if entry_id in self.df.index:
-            self.df = self.df.drop(entry_id)
 
     def apply_to_column(self, column, func):
         self.df[column] = self.df[column].apply(func)
