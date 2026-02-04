@@ -9,6 +9,14 @@ from datacleaner.datacleaner import DataCleaner
 import re
 
 
+######################## Datos Alquiler ##########################
+#Inicializo el scrapper de alquiler y scrappeo n paginas
+scraper = Scrapper(headless=True, url_base="https://www.argenprop.com/departamentos/alquiler/capital-federal?orden-masnuevos")
+all_data = CSVStorage("storage/data/historic/arg_alquiler_data.csv").get_all().reset_index().to_dict(orient="records")
+all_data = scraper.update_old_data(all_data)
+pd.DataFrame(all_data).to_csv("storage/data/historic/arg_alquiler_data_prueba.csv", index=False)
+storage_scapped_data = CSVStorage("storage/data/historic/arg_alquiler_data.csv")
+scraper.close()
 
 # ####################### Datos Venta ########################
 # #Inicializo el scrapper de venta y scrappeo n paginas

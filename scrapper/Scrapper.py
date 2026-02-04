@@ -1,12 +1,15 @@
-from abc import ABC, abstractmethod
-from playwright.sync_api import sync_playwright
+from playwright.async_api import async_playwright
 import json
 import requests
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Optional
 
+
+# ──────────────────────────────
+# Data model
+# ──────────────────────────────
 
 @dataclass
 class InmuebleData:
@@ -36,27 +39,44 @@ class InmuebleData:
     image_url: Optional[str] = None
     imagen_path: Optional[str] = None
 
+    def to_dict(self):
+        return asdict(self)
+
+
+# ──────────────────────────────
+# Scrapper
+# ──────────────────────────────
 
 class Scrapper:
     def __init__(self, url_base: str, headless: bool = True):
         self.url_base = url_base
-        self.api_calls = []
+        self.headless = headless
 
-        self.playwright = sync_playwright().start()
-        self.browser = self.playwright.chromium.launch(headless=headless)
-        self.page = self.browser.new_page()
-        self.detail_page = self.browser.new_page()
+        self.playwright = None
+        self.browser = None
+        self.page = None
+        self.detail_page = None
 
     # ──────────────────────────────
-    # Ciclo de vida
+    # Lifecycle
     # ──────────────────────────────
 
-    def close(self):
-        self.browser.close()
-        self.playwright.stop()
+    async def start(self):
+        self.playwright = await async_playwright().start()
+        self.browser = await self.playwright.chromium.launch(
+            headless=self.headless
+        )
+        self.page = await self.browser.new_page()
+        self.detail_page = await self.browser.new_page()
 
-    def scroll_page(self, n_scrolls=10, delay_ms=800):
-        self.page.evaluate(
+    async def close(self):
+        if self.browser:
+            await self.browser.close()
+        if self.playwright:
+            await self.playwright.stop()
+
+    async def scroll_page(self, n_scrolls=10, delay_ms=800):
+        await self.page.evaluate(
             f"""
             async () => {{
                 for (let i = 0; i < {n_scrolls}; i++) {{
@@ -68,16 +88,14 @@ class Scrapper:
         )
 
     # ──────────────────────────────
-    # Helpers
+    # Helpers (pure python)
     # ──────────────────────────────
 
-    def safe_text(self, element, selector):
-        el = element.query_selector(selector)
-        return el.inner_text().strip() if el else None
-
-    def safe_attr(self, element, selector, attr):
-        el = element.query_selector(selector)
-        return el.get_attribute(attr) if el else None
+    def safe_int(self, txt):
+        if not txt:
+            return None
+        m = re.search(r"\d+", txt)
+        return int(m.group()) if m else None
 
     def normalize_label(self, text: str) -> str:
         return (
@@ -92,16 +110,6 @@ class Scrapper:
     # ──────────────────────────────
     # I/O
     # ──────────────────────────────
-
-    def save_api_calls(self, filename="api_calls.json"):
-        with open(filename, "w", encoding="utf-8") as f:
-            json.dump(self.api_calls, f, ensure_ascii=False, indent=4)
-
-    def html_snapshot(self, filename="snapshot.html"):
-        html = self.page.content()
-        with open(filename, "w", encoding="utf-8") as f:
-            f.write(html)
-        return html
 
     def download_image(self, url, listing_id):
         if not url:
@@ -122,27 +130,32 @@ class Scrapper:
         return None
 
     # ──────────────────────────────
-    # Extracción: página de resultados
+    # Result page extraction
     # ──────────────────────────────
 
-    def extract_listings_from_page(self):
+    async def extract_listings_from_page(self):
         listings = []
-        items = self.page.query_selector_all(".listing__item")
+        items = await self.page.query_selector_all(".listing__item")
 
         for item in items:
             try:
-                listing_id = item.get_attribute("id")
-                href = self.safe_attr(item, "a.card", "href")
+                listing_id = await item.get_attribute("id")
+                href = await item.get_attribute("href")
+
+                card = await item.query_selector("a.card")
+                href = await card.get_attribute("href") if card else None
                 if not href:
                     continue
 
                 url = f"https://www.argenprop.com{href}"
 
-                img = item.query_selector(".card__photos img")
-                image_url = (
-                    img.get_attribute("src") or img.get_attribute("data-src")
-                    if img else None
-                )
+                img = await item.query_selector(".card__photos img")
+                image_url = None
+                if img:
+                    image_url = (
+                        await img.get_attribute("src")
+                        or await img.get_attribute("data-src")
+                    )
 
                 imagen_path = (
                     self.download_image(image_url, listing_id)
@@ -162,21 +175,21 @@ class Scrapper:
         return listings
 
     # ──────────────────────────────
-    # Extracción: página de detalle
+    # Detail page extraction
     # ──────────────────────────────
 
-    def extract_detail_data(self, url):
-        self.detail_page.goto(url)
-        self.detail_page.wait_for_timeout(2000)
+    async def extract_detail_data(self, url):
+        await self.detail_page.goto(url)
+        await self.detail_page.wait_for_timeout(2000)
 
-        precio, moneda, expensas = self.extract_price_and_expenses()
-        superficies = self.extract_superficies()
-        features = self.extract_features_from_section("section-caracteristicas")
-        edificio = self.extract_features_from_section(
+        precio, moneda, expensas = await self.extract_price_and_expenses()
+        superficies = await self.extract_superficies()
+        features = await self.extract_features_from_section("section-caracteristicas")
+        edificio = await self.extract_features_from_section(
             "section-caracteristicas-del-edificio"
         )
-        datos_basicos = self.extract_features_from_section("section-datos-basicos")
-        lat, lon = self.extract_lat_lon()
+        datos_basicos = await self.extract_features_from_section("section-datos-basicos")
+        lat, lon = await self.extract_lat_lon()
 
         return {
             "precio": precio,
@@ -199,25 +212,25 @@ class Scrapper:
         }
 
     # ──────────────────────────────
-    # Orquestador
+    # Orchestrator
     # ──────────────────────────────
 
-    def extract_all_pages(self, n_pages=5):
+    async def extract_all_pages(self, n_pages=5):
         inmuebles = []
 
         for page_num in range(1, n_pages + 1):
             print(f"Scraping página {page_num}")
 
-            self.page.goto(f"{self.url_base}?pagina-{page_num}")
-            self.page.wait_for_selector(".listing__item", timeout=10000)
-            self.scroll_page()
+            await self.page.goto(f"{self.url_base}?pagina-{page_num}")
+            await self.page.wait_for_selector(".listing__item", timeout=10000)
+            await self.scroll_page()
 
-            listings = self.extract_listings_from_page()
+            listings = await self.extract_listings_from_page()
             print(f" → {len(listings)} listings encontrados")
 
             for base in listings:
                 try:
-                    detail = self.extract_detail_data(base["url"])
+                    detail = await self.extract_detail_data(base["url"])
 
                     inmuebles.append(
                         InmuebleData(
@@ -235,41 +248,41 @@ class Scrapper:
         return inmuebles
 
     # ──────────────────────────────
-    # Extractores específicos
+    # Specific extractors
     # ──────────────────────────────
 
-    def extract_features_from_section(self, section_id):
+    async def extract_features_from_section(self, section_id):
         features = {}
-        items = self.detail_page.query_selector_all(f"#{section_id} li")
+        items = await self.detail_page.query_selector_all(f"#{section_id} li")
 
         for li in items:
-            p = li.query_selector("p")
-            strong = li.query_selector("strong")
+            p = await li.query_selector("p")
+            strong = await li.query_selector("strong")
             if not p or not strong:
                 continue
 
+            p_txt = await p.inner_text()
+            s_txt = await strong.inner_text()
+
             label = self.normalize_label(
-                p.inner_text()
-                .replace(strong.inner_text(), "")
-                .replace(":", "")
-                .strip()
+                p_txt.replace(s_txt, "").replace(":", "").strip()
             )
 
-            features[label] = strong.inner_text().strip()
+            features[label] = s_txt.strip()
 
         return features
 
-    def extract_superficies(self):
-        raw = self.extract_features_from_section("section-superficie")
+    async def extract_superficies(self):
+        raw = await self.extract_features_from_section("section-superficie")
 
         sup = {"sup_cubierta": None, "sup_descubierta": None, "sup_total": None}
 
         for k, v in raw.items():
-            m = re.search(r"\d+", v)
+            m = re.search(r"\d+([.,]\d+)?", v)
             if not m:
                 continue
 
-            val = int(m.group())
+            val = float(m.group().replace(",", "."))
 
             if " cubierta" in k:
                 sup["sup_cubierta"] = val
@@ -283,25 +296,25 @@ class Scrapper:
 
         return sup
 
-    def extract_lat_lon(self):
-        map_div = self.detail_page.query_selector("[data-location-map]")
+    async def extract_lat_lon(self):
+        map_div = await self.detail_page.query_selector("[data-location-map]")
         if not map_div:
             return None, None
 
-        lat = map_div.get_attribute("data-latitude")
-        lon = map_div.get_attribute("data-longitude")
+        lat = await map_div.get_attribute("data-latitude")
+        lon = await map_div.get_attribute("data-longitude")
 
         if not lat or not lon:
             return None, None
 
         return float(lat.replace(",", ".")), float(lon.replace(",", "."))
 
-    def extract_price_and_expenses(self):
+    async def extract_price_and_expenses(self):
         precio = expensas = moneda = None
 
-        price_el = self.detail_page.query_selector(".titlebar__price")
+        price_el = await self.detail_page.query_selector(".titlebar__price")
         if price_el:
-            txt = price_el.inner_text().lower()
+            txt = (await price_el.inner_text()).lower()
             moneda = "USD" if "u$s" in txt or "usd" in txt else "ARS"
             try:
                 precio = int(
@@ -314,11 +327,11 @@ class Scrapper:
             except ValueError:
                 pass
 
-        exp_el = self.detail_page.query_selector(".titlebar__expenses")
+        exp_el = await self.detail_page.query_selector(".titlebar__expenses")
         if exp_el:
             try:
                 expensas = int(
-                    exp_el.inner_text()
+                    (await exp_el.inner_text())
                     .lower()
                     .replace("+", "")
                     .replace("$", "")
@@ -330,29 +343,3 @@ class Scrapper:
                 pass
 
         return precio, moneda, expensas
-
-
-    def update_old_data(self, listings):
-        inmuebles = []
-
-
-        print(f" → {len(listings)} listings encontrados")
-
-        for base in listings:
-            try:
-                detail = self.extract_detail_data(base["url"])
-
-                inmuebles.append(
-                    InmuebleData(
-                        id=base["id"],
-                        url=base["url"],
-                        image_url=base["image_url"],
-                        imagen_path=base["imagen_path"],
-                        **detail,
-                    )
-                )
-
-            except Exception as e:
-                print(f"Error en {base['url']}: {e}")
-
-        return inmuebles

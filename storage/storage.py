@@ -68,7 +68,7 @@ class CSVStorage(Storage):
                 parse_dates=["valido_desde", "valido_hasta"]
             ).set_index("idx")
         else:
-            df = pd.DataFrame()
+            df = pd.DataFrame(columns=["valido_desde", "valido_hasta"])
             df.index.name = "idx"
             return df
 
