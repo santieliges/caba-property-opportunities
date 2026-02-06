@@ -80,7 +80,7 @@ class BaseScrapper:
             status = response.status
 
             if status >= 400:
-                return False, f"http {status}"
+                return False, status
 
             return True, status
 
