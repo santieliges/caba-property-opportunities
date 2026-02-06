@@ -1,4 +1,5 @@
-from scrapper.Scrapper import ArgenPropScrapper, AmbitoDolarScrapper, InmuebleData
+from scrapper import ArgenPropScrapper, AmbitoDolarScrapper
+from scrapper.ArgenPropScrapper import InmuebleData
 class Updater:
     def __init__(self):
         pass
@@ -7,8 +8,9 @@ class Updater:
         if not url:
             return None
 
-        if await argenPropScrapper.check_url_change(url):
-            return None
+        ok, info = await argenPropScrapper.check_url_change(url)
+        if not ok:
+            return info
 
         detail = await argenPropScrapper.extract_detail_data(url)
 

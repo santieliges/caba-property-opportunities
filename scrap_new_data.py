@@ -1,15 +1,17 @@
-from scrapper.Scrapper import ArgenPropScrapper, AmbitoDolarScrapper
+from scrapper.ArgenPropScrapper import ArgenPropScrapper
+from scrapper.AmbitoDolarScrapper import AmbitoDolarScrapper
 from routineJob.routineJob import RoutineJob
 from updater.updater import Updater
 import json
 import pandas as pd
-from storage.storage import CSVStorage
+from storage.CSVStorage import CSVStorage
 from sync.sync import Synchronizer
 from datacleaner.datacleaner import DataCleaner
 import re
 import asyncio
+import traceback
 
-async def run_job(url, csv_path):
+async def run_job(url, csv_path, n_pages = 5):
     scrapper = ArgenPropScrapper(
         headless=True,
         url_base=url
@@ -25,20 +27,25 @@ async def run_job(url, csv_path):
         synchronizer=sync_data
     )
     try:
-        await routine_job.fetch_and_sync_new_listings(n_pages=2)
+        await routine_job.fetch_and_sync_new_listings(n_pages=n_pages)
     except Exception as e:
-        print(f"Error running job for {url}: {e}")
+
+        print(f"Error running job for {url}")
+        traceback.print_exc()
+
 
 
 async def main():
     await asyncio.gather(
         run_job(
-            "https://www.argenprop.com/departamentos/alquiler/capital-federal?orden-masnuevos",
-            "storage/data/historic/arg_alquiler_data.csv"
+            "https://www.argenprop.com/departamentos/alquiler/capital-federal",
+            "storage/data/arg_alquiler_data.csv",
+            3
         ),
         run_job(
-            "https://www.argenprop.com/departamentos/venta/capital-federal?orden-masnuevos",
-            "storage/data/historic/arg_venta_data.csv"
+            "https://www.argenprop.com/departamentos/venta/capital-federal",
+            "storage/data/arg_venta_data.csv",
+            3   
         )
     )
 

@@ -1,7 +1,8 @@
 import asyncio
-from storage.storage import Storage, CSVStorage
+from storage.CSVStorage import CSVStorage
 from sync.sync import Synchronizer
-from scrapper.Scrapper import ArgenPropScrapper, AmbitoDolarScrapper
+from scrapper.ArgenPropScrapper import ArgenPropScrapper
+from scrapper.AmbitoDolarScrapper import AmbitoDolarScrapper
 from updater.updater import Updater
 from routineJob.routineJob import RoutineJob
 import pandas as pd
@@ -67,13 +68,13 @@ async def main():
     updater = Updater()
     await asyncio.gather(
         run_argenprop_job(
-            csv_path="storage/data/historic/arg_alquiler_data.csv",
-            url_base="https://www.argenprop.com/departamentos/alquiler/capital-federal?orden-masnuevos",
+            csv_path="storage/data/arg_alquiler_data copy.csv",
+            url_base="https://www.argenprop.com",
             updater=updater,
         ),
         run_argenprop_job(
-            csv_path="storage/data/historic/arg_venta_data.csv",
-            url_base="https://www.argenprop.com/departamentos/venta/capital-federal?orden-masnuevos",
+            csv_path="storage/data/arg_venta_data copy.csv",
+            url_base="https://www.argenprop.com",
             updater=updater,
         )
     )

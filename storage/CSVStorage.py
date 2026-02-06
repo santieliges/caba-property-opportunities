@@ -2,6 +2,19 @@
 import pandas as pd
 from pathlib import Path
 from storage.storage import Storage
+DTYPES = {
+    "id": "Int64",
+    "precio": "Int64",
+    "moneda": "string",
+    "expensas": "Int64",
+    "tipo_unidad": "string",
+    "area_m2_total": "Float64",
+    "ambientes": "Int64",
+    "banos": "Int64",
+    "cocheras": "Int64",
+    "latitud": "Float64",
+    "longitud": "Float64",
+}
 
 class CSVStorage(Storage):
     def __init__(self, path: str):
@@ -14,16 +27,31 @@ class CSVStorage(Storage):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.save()
 
+    def _normalize_entry(self, entry: dict) -> dict:
+        out = {}
+        for k, v in entry.items():
+            if k in ["precio", "expensas", "ambientes", "banos", "cocheras"]:
+                out[k] = None if v is None else int(v)
+            elif k in ["area_m2_total", "latitud", "longitud"]:
+                out[k] = None if v is None else float(v)
+            else:
+                out[k] = v
+        return out
+
     def load(self):
         if self.path.exists():
-            return pd.read_csv(
+            df = pd.read_csv(
                 self.path,
-                parse_dates=["valido_desde", "valido_hasta"]
-            ).set_index("idx")
+                parse_dates=["valido_desde", "valido_hasta"],
+                dtype={k: v for k, v in DTYPES.items() if k != "id"}
+            )
+            df["id"] = df["id"].astype("int")
+            return df.set_index("idx")
         else:
-            df = pd.DataFrame(columns=["valido_desde", "valido_hasta"])
+            df = pd.DataFrame(columns=["id","valido_desde", "valido_hasta"])
             df.index.name = "idx"
             return df
+
 
     def _next_idx(self) -> int:
         if self.df.empty:
@@ -42,7 +70,12 @@ class CSVStorage(Storage):
         mask = self.df["id"] == entry_id
         if only_active:
             mask &= self.df["valido_hasta"].isna()
-        return self.df.loc[mask].copy()
+
+        rows = self.df.loc[mask]
+        if rows.empty:
+            return None
+
+        return rows.iloc[0].to_dict()
 
     def exists(self, entry_id) -> bool:
         return (
@@ -52,12 +85,12 @@ class CSVStorage(Storage):
 
 
     def insert(self, entry: dict, valid_from):
-        entry = entry.copy()
+        entry = self._normalize_entry(entry.copy())
         entry["valido_desde"] = valid_from
         entry["valido_hasta"] = pd.NaT
-
         idx = self._next_idx()
         self.df.loc[idx, entry.keys()] = entry.values()
+
 
 
     def close(self, entry_id, valid_to):

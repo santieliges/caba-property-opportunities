@@ -1,8 +1,8 @@
 from storage.storage import Storage
-from scrapper.Scrapper import ArgenPropScrapper
+from scrapper import ArgenPropScrapper
 from updater.updater import Updater
 from sync.sync import Synchronizer
-
+import traceback
 
 class RoutineJob:
     def __init__(
@@ -17,29 +17,53 @@ class RoutineJob:
         self.updater = updater
         self.sync = synchronizer
 
-    async def fetch_and_sync_data(self):
+    async def fetch_and_sync_data(self, batch_size: int = 1000):
         """
         Recorre todas las entradas activas del storage,
         obtiene el estado actual vía Updater y delega
         la decisión al Synchronizer.
+        Guarda en disco cada `batch_size` entradas procesadas.
         """
         await self.scrapper.start()
         data = self.storage.get_all()
 
-        for entry_idx, old_entry in data.iterrows():
-            print(f"[RoutineJob] Procesando {entry_idx} de {len(data)}  entradas.")
+        processed = 0
+
+        for i, (entry_idx, old_entry) in enumerate(data.iterrows(), start=1):
+            print(f"[RoutineJob] Procesando {i} de {len(data)} entradas.")
             entry_id = old_entry.get('id')
+
             try:
-                new_entry = await self.updater.fetch(entry_id, old_entry, argenPropScrapper=self.scrapper)
-                self.sync.sync_entry(entry_id, new_entry)
+                new_entry = await self.updater.fetch(
+                    entry_id,
+                    old_entry,
+                    argenPropScrapper=self.scrapper
+                )
+                if isinstance(new_entry, dict):        
+                    self.sync.sync_entry(entry_id, new_entry)
+                    processed += 1
+                elif new_entry == 410:
+                    self.sync.sync_entry(entry_id, None)
+                    processed += 1
+                else:
+                    print(f"No se pudo acceder a la URL, error: {new_entry}")
+                    continue
+                # 🔹 guardado por batch
+                if processed % batch_size == 0:
+                    print(f"[RoutineJob] Guardando batch ({processed} registros procesados)")
+                    self.storage.save()
 
-            except Exception as e:
-                # decisión explícita: el job no cae por una URL rota
-                print(f"[RoutineJob] Error procesando {entry_id}: {e}")
+            except Exception:
+                print(f"Error running job for entry_id={entry_id}")
+                traceback.print_exc()
 
-        # una sola escritura al final
-        self.storage.save()
+        # 🔹 guardado final de seguridad
+        if processed % batch_size != 0:
+            print(f"[RoutineJob] Guardado final ({processed} registros totales)")
+            self.storage.save()
+
         await self.scrapper.close()
+
 
     async def fetch_and_sync_new_listings(self, n_pages=5):
         await self.scrapper.start()

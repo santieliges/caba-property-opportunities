@@ -31,6 +31,7 @@ class RegressionKrigingModel(BaseModel):
 
     def fit(self, X, y, coords):
         self.rf_ = self._build_rf()
+        y = np.asarray(y).ravel()   
 
         self.model_ = RegressionKriging(
             regression_model=self.rf_,
@@ -44,7 +45,7 @@ class RegressionKrigingModel(BaseModel):
     def predict(self, X, coords):
         if not self.is_fitted_:
             raise RuntimeError("El modelo no está entrenado")
-        return self.model_.predict(X, coords)
+        return self.model_.predict(X, coords).reshape(-1, 1)
 
     def tune_hyperparameters(
         self,
@@ -88,7 +89,7 @@ class RegressionKrigingModel(BaseModel):
             )
             model.fit(X, coords, y)
             preds = model.predict(X, coords)
-            rmse = mean_squared_error(y, preds, squared=False)
+            rmse = np.sqrt(mean_squared_error(y.flatten(), preds))
 
             if rmse < best_rmse:
                 best_rmse = rmse

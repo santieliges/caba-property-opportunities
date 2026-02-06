@@ -1,6 +1,6 @@
 from playwright.async_api import async_playwright
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
-
+from typing import Tuple, Union
 import re
 
 
@@ -50,12 +50,20 @@ class BaseScrapper:
             .replace("ó", "o")
             .replace("ú", "u")
         )
-    async def check_url_change(self, url: str, timeout: int = 10000) -> bool:
+
+    async def check_url_change(
+        self,
+        url: str,
+        timeout: int = 10_000
+    ) -> Tuple[bool, Union[int, str]]:
         """
         Verifica si una URL es accesible.
-        Devuelve:
-            True  -> la URL responde correctamente
-            False -> la URL cambió, fue removida o da error (401, 403, 404, etc.)
+
+        Returns
+        -------
+        (ok, info)
+            ok   : bool
+            info : status code o mensaje de error
         """
         page = await self.browser.new_page()
 
@@ -67,23 +75,20 @@ class BaseScrapper:
             )
 
             if response is None:
-                return False
+                return False, "no response"
 
             status = response.status
 
             if status >= 400:
-                return False
+                return False, f"http {status}"
 
-            return True
+            return True, status
 
-        except PlaywrightTimeoutError:
-            return False
+        except PlaywrightTimeoutError as e:
+            return False, "timeout"
 
         except Exception as e:
-
-            exc_info=True
-            return False
+            return False, str(e)
 
         finally:
             await page.close()
-

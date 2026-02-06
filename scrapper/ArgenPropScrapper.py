@@ -12,7 +12,7 @@ import json
 
 @dataclass
 class InmuebleData:
-    id: str
+    id: int
     url: str
     precio: Optional[int] = None
     moneda: Optional[str] = None
@@ -26,6 +26,7 @@ class InmuebleData:
     antiguedad: Optional[int] = None
     estado_edificio: Optional[str] = None
     ambientes: Optional[int] = None
+    dormitorios: Optional[int] = None
     banos: Optional[int] = None
     estado: Optional[str] = None
     disposicion: Optional[str] = None
@@ -38,8 +39,38 @@ class InmuebleData:
     image_url: Optional[str] = None
     imagen_path: Optional[str] = None
 
+    def __post_init__(self):
+        self.precio = self._to_int(self.precio)
+        self.expensas = self._to_int(self.expensas)
+        self.ambientes = self._to_int(self.ambientes)
+        self.dormitorios = self._to_int(self.dormitorios)
+        self.banos = self._to_int(self.banos)
+        self.cocheras = self._to_int(self.cocheras)
+
+        self.area_m2_cubierta = self._to_float(self.area_m2_cubierta)
+        self.area_m2_descubierta = self._to_float(self.area_m2_descubierta)
+        self.area_m2_total = self._to_float(self.area_m2_total)
+
+        self.latitud = self._to_float(self.latitud)
+        self.longitud = self._to_float(self.longitud)
+
+    @staticmethod
+    def _to_int(v):
+        try:
+            return int(v) if v is not None else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _to_float(v):
+        try:
+            return float(v) if v is not None else None
+        except Exception:
+            return None
+
     def to_dict(self):
         return asdict(self)
+
     
 class ArgenPropScrapper(BaseScrapper):
     def __init__(self, url_base: str, headless: bool = True):
@@ -92,11 +123,12 @@ class ArgenPropScrapper(BaseScrapper):
 
         for item in items:
             try:
-                listing_id = await item.get_attribute("id")
                 href = await item.get_attribute("href")
 
                 card = await item.query_selector("a.card")
                 href = await card.get_attribute("href") if card else None
+                listing_id = self.extract_argenprop_id(href)
+
                 if not href:
                     continue
 
@@ -123,7 +155,7 @@ class ArgenPropScrapper(BaseScrapper):
                 })
 
             except Exception as e:
-                print(f"Error procesando listing {listing_id}: {e}")
+                print(f"Error procesando listing: {e}")
 
         return listings
 
@@ -153,6 +185,7 @@ class ArgenPropScrapper(BaseScrapper):
             "area_m2_total": superficies.get("sup_total"),
             "antiguedad": features.get("antiguedad") or edificio.get("antiguedad"),
             "ambientes": features.get("cant. ambientes"),
+            "dormitorios":features.get("cant. dormitorios"),
             "banos": features.get("cant. baños"),
             "estado": features.get("estado"),
             "disposicion": features.get("disposicion"),
@@ -296,3 +329,9 @@ class ArgenPropScrapper(BaseScrapper):
                 pass
 
         return precio, moneda, expensas
+    
+    def extract_argenprop_id(self, url):
+        m = re.search(r'--(\d+)$', str(url))
+        return int(m.group(1)) if m else None
+
+    
