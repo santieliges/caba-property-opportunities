@@ -1,5 +1,5 @@
 
-from baseModel import BaseModel
+from .baseModel import BaseModel
 from sklearn.preprocessing import StandardScaler
 from mgwr.sel_bw import Sel_BW
 from mgwr.gwr import GWR
@@ -63,12 +63,20 @@ class GWRModel(BaseModel):
 
         X_std = self.scaler_.transform(X)
 
-        preds = self.model_.predict(
-            coords,
-            X_std
-        ).predictions.flatten()
+        model_pred = GWR(
+            coords=self.coords_train_,
+            y=self.y_train_,
+            X=self.X_train_,
+            bw=self.bw_,
+            kernel=self.gwr_params.get("kernel", "bisquare"),
+            fixed=self.gwr_params.get("fixed", False),
+        )
 
+        model_pred.fit()
+
+        preds = model_pred.predict(coords, X_std).predictions.flatten()
         return preds
+
 
     def tune_hyperparameters(
         self,
@@ -304,3 +312,8 @@ class GWRModel(BaseModel):
             smooth=rbf_smooth
         )
         return rbf(Xi, Yi)
+
+    def summary(self):
+        if not self.is_fitted_:
+            raise RuntimeError("El modelo no está entrenado")
+        return self.results_.summary()

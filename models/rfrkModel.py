@@ -1,4 +1,4 @@
-from baseModel import BaseModel
+from .baseModel import BaseModel
 from pykrige.rk import RegressionKriging
 from libpysal.weights import KNN
 from sklearn.ensemble import RandomForestRegressor
@@ -100,3 +100,8 @@ class RegressionKrigingModel(BaseModel):
         # Refit final
         self.fit(X, y, coords)
         return self
+
+    def feature_importances_(self):
+        if not self.is_fitted_:
+            raise RuntimeError("El modelo no está entrenado")
+        return self.rf_.feature_importances_
