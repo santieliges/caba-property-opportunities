@@ -38,12 +38,12 @@ async def run_job(url, csv_path, n_pages = 5):
 async def main():
     await asyncio.gather(
         run_job(
-            "https://www.argenprop.com/departamentos/alquiler/capital-federal",
+            "https://www.argenprop.com/departamentos/alquiler/capital-federal?orden-masnuevos",
             "storage/data/arg_alquiler_data.csv",
             3
         ),
         run_job(
-            "https://www.argenprop.com/departamentos/venta/capital-federal",
+            "https://www.argenprop.com/departamentos/venta/capital-federal?orden-masnuevos",
             "storage/data/arg_venta_data.csv",
             3   
         )

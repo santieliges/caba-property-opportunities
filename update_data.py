@@ -39,7 +39,7 @@ async def run_argenprop_job(
         synchronizer=sync,
     )
 
-    await job.fetch_and_sync_data()
+    await job.fetch_and_sync_data(batch_size=100)
 
 async def main():
 
@@ -68,12 +68,12 @@ async def main():
     updater = Updater()
     await asyncio.gather(
         run_argenprop_job(
-            csv_path="storage/data/arg_alquiler_data copy.csv",
+            csv_path="storage/data/arg_alquiler_data.csv",
             url_base="https://www.argenprop.com",
             updater=updater,
         ),
         run_argenprop_job(
-            csv_path="storage/data/arg_venta_data copy.csv",
+            csv_path="storage/data/arg_venta_data_a_actualizar.csv",
             url_base="https://www.argenprop.com",
             updater=updater,
         )
