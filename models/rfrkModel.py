@@ -9,11 +9,11 @@ import numpy as np
 
 class RegressionKrigingModel(BaseModel):
     def __init__(self, rf_params=None, kriging_params=None):
+        super().__init__()
         self.rf_params = rf_params or {}
         self.kriging_params = kriging_params or {}
 
         self.rf_ = None
-        self.model_ = None
         self.best_params_ = None
         self.is_fitted_ = False
 
@@ -30,6 +30,8 @@ class RegressionKrigingModel(BaseModel):
         )
 
     def fit(self, X, y, coords):
+        self.feature_names_ = X.columns
+
         self.rf_ = self._build_rf()
         y = np.asarray(y).ravel()   
 
@@ -43,6 +45,7 @@ class RegressionKrigingModel(BaseModel):
         return self
 
     def predict(self, X, coords):
+        X = X[self.feature_names_]
         if not self.is_fitted_:
             raise RuntimeError("El modelo no está entrenado")
         return self.model_.predict(X, coords).reshape(-1, 1)

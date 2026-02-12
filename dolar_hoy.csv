@@ -1,6 +1,6 @@
 tipo,operacion,valor,raw,url
-oficial,compra,1402.93,"1402,93",https://www.ambito.com/contenidos/dolar-oficial.html
-oficial,venta,1453.24,"1453,24",https://www.ambito.com/contenidos/dolar-oficial.html
+oficial,compra,1376.8,"1376,80",https://www.ambito.com/contenidos/dolar-oficial.html
+oficial,venta,1427.34,"1427,34",https://www.ambito.com/contenidos/dolar-oficial.html
 nacion,compra,,,https://www.ambito.com/contenidos/dolar-nacion.html
 nacion,venta,,,https://www.ambito.com/contenidos/dolar-nacion.html
 mep,compra,,,https://www.ambito.com/contenidos/dolar-mep.html

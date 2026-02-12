@@ -15,11 +15,11 @@ from shapely.geometry import Point
 
 class GWRModel(BaseModel):
     def __init__(self, gwr_params=None):
+        super().__init__()
         self.gwr_params = gwr_params or {}
 
         self.scaler_ = None
         self.bw_ = None
-        self.model_ = None
         self.results_ = None
 
         self.X_train_ = None
@@ -29,6 +29,8 @@ class GWRModel(BaseModel):
         self.is_fitted_ = False
 
     def fit(self, X, y, coords):
+        self.feature_names_ = X.columns
+
         self.scaler_ = StandardScaler()
         X_std = self.scaler_.fit_transform(X)
 
@@ -60,9 +62,9 @@ class GWRModel(BaseModel):
     def predict(self, X, coords):
         if not self.is_fitted_:
             raise RuntimeError("El modelo no está entrenado")
-
+        X = X[self.feature_names_]
         X_std = self.scaler_.transform(X)
-
+        
         model_pred = GWR(
             coords=self.coords_train_,
             y=self.y_train_,
