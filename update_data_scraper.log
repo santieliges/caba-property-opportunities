@@ -1,0 +1,6 @@
+2026-02-04 15:35:49,765 | ERROR | asyncio | Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed\nCall log:\n  - navigating to "https://www.argenprop.com/departamento-en-alquiler-en-san-telmo-4-ambientes--18636494", waiting until "domcontentloaded"\n')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Call log:
+  - navigating to "https://www.argenprop.com/departamento-en-alquiler-en-san-telmo-4-ambientes--18636494", waiting until "domcontentloaded"
+
