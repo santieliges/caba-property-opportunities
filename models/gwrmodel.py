@@ -21,6 +21,7 @@ class GWRModel(BaseModel):
         self.scaler_ = None
         self.bw_ = None
         self.results_ = None
+        self.summary_ = None
 
         self.X_train_ = None
         self.coords_train_ = None
@@ -56,28 +57,21 @@ class GWRModel(BaseModel):
         )
 
         self.results_ = self.model_.fit()
+        self.summary_ = self.results_.summary()
         self.is_fitted_ = True
         return self
 
     def predict(self, X, coords):
         if not self.is_fitted_:
             raise RuntimeError("El modelo no está entrenado")
+
         X = X[self.feature_names_]
         X_std = self.scaler_.transform(X)
-        
-        model_pred = GWR(
-            coords=self.coords_train_,
-            y=self.y_train_,
-            X=self.X_train_,
-            bw=self.bw_,
-            kernel=self.gwr_params.get("kernel", "bisquare"),
-            fixed=self.gwr_params.get("fixed", False),
-        )
 
-        model_pred.fit()
+        pred_results = self.model_.predict(coords, X_std)
 
-        preds = model_pred.predict(coords, X_std).predictions.flatten()
-        return preds
+        return pred_results.predictions.flatten()
+
 
 
     def tune_hyperparameters(
@@ -318,4 +312,4 @@ class GWRModel(BaseModel):
     def summary(self):
         if not self.is_fitted_:
             raise RuntimeError("El modelo no está entrenado")
-        return self.results_.summary()
+        return self.summary_
