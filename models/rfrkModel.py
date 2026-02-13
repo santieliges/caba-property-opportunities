@@ -32,23 +32,37 @@ class RegressionKrigingModel(BaseModel):
     def fit(self, X, y, coords):
         self.feature_names_ = X.columns
 
+        self.X_train_ = X.copy()
+        self.coords_train_ = np.asarray(coords).copy()
+        self.y_train_ = np.asarray(y).ravel()
+
         self.rf_ = self._build_rf()
-        y = np.asarray(y).ravel()   
 
         self.model_ = RegressionKriging(
             regression_model=self.rf_,
             n_closest_points=self.kriging_params.get("n_closest_points", 10),
         )
 
-        self.model_.fit(X, coords, y)
+        self.model_.fit(self.X_train_, self.coords_train_, self.y_train_)
         self.is_fitted_ = True
         return self
+
 
     def predict(self, X, coords):
         X = X[self.feature_names_]
         if not self.is_fitted_:
             raise RuntimeError("El modelo no está entrenado")
         return self.model_.predict(X, coords).reshape(-1, 1)
+    
+    def in_sample_predictions(self):
+        if not self.is_fitted_:
+            raise RuntimeError("El modelo no está entrenado")
+
+        return self.model_.predict(
+            self.X_train_,
+            self.coords_train_
+        ).reshape(-1, 1)
+
 
     def tune_hyperparameters(
         self,

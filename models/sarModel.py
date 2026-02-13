@@ -18,10 +18,14 @@ class SpatialAutoregressiveModel(BaseModel):
 
     def fit(self, X, y, coords):
         self.feature_names_ = list(X.columns)
+        self.X_train_ = X.copy()
+        self.coords_train_ = np.asarray(coords).copy()
+        self.y_train_ = np.asarray(y).reshape(-1, 1)
+        
 
         y = np.asarray(y).reshape(-1, 1)
         X = np.asarray(X)
-
+        
         self.w = self._build_weights(coords)
 
         self.model_ = ML_Lag(
@@ -35,7 +39,7 @@ class SpatialAutoregressiveModel(BaseModel):
         self.is_fitted_ = True
         return self
 
-    def predict(self, X=None, coords=None):
+    def in_sample_predictions(self):
         if not self.is_fitted_:
             raise ValueError("Model not fitted.")
 

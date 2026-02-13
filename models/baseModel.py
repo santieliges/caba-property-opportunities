@@ -9,6 +9,10 @@ class BaseModel:
         self.best_params_ = None
         self.is_fitted_ = False
         self.feature_names_ = None
+        
+        self.coords_train_ = None
+        self.X_train_ = None
+        self.y_train_ = None
 
     def fit(self, X, y, coords):
         raise NotImplementedError

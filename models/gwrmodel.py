@@ -35,9 +35,9 @@ class GWRModel(BaseModel):
         self.scaler_ = StandardScaler()
         X_std = self.scaler_.fit_transform(X)
 
-        self.coords_train_ = coords
-        self.X_train_ = X_std
-        self.y_train_ = y.reshape(-1, 1)
+        self.X_train_ = X.copy()
+        self.coords_train_ = np.asarray(coords).copy()
+        self.y_train_ = np.asarray(y).reshape(-1, 1)
 
         bw_selector = Sel_BW(
             coords,
@@ -72,7 +72,11 @@ class GWRModel(BaseModel):
 
         return pred_results.predictions.flatten()
 
+    def in_sample_predictions(self):
+        if not self.is_fitted_:
+            raise RuntimeError("El modelo no está entrenado")
 
+        return self.results_.predy.flatten()
 
     def tune_hyperparameters(
         self,
@@ -205,9 +209,7 @@ class GWRModel(BaseModel):
                 for xx, yy in zip(Xi.ravel(), Yi.ravel())
             ]).reshape(Xi.shape)
 
-        # ──────────────────────────────
-        # Coeficientes a plotear
-        # ──────────────────────────────
+
         coef_names = (
             ["intercept", "local_R2"] +
             [f"beta_{v}" for v in feature_names]
@@ -225,9 +227,6 @@ class GWRModel(BaseModel):
 
         surfaces = {}
 
-        # ──────────────────────────────
-        # Loop de superficies
-        # ──────────────────────────────
         for ax, coef in zip(axes, coef_names):
 
             Zi = self._rbf_surface(

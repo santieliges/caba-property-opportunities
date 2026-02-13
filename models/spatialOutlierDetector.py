@@ -29,6 +29,9 @@ class SpatialOutlierDetector:
 
         z_scores = np.full(n, np.nan)
 
+        # ----------------------------
+        # GLOBAL (no spatial weights)
+        # ----------------------------
         if w is None:
             if robust:
                 loc = self.LOO_median(y)
@@ -37,17 +40,26 @@ class SpatialOutlierDetector:
                 loc = np.mean(y)
                 scale = np.std(y, ddof=1)
 
-            if np.any(scale < eps):
+            if scale < eps:
                 raise ValueError("Escala nula o casi nula")
 
             z_scores = (y - loc) / scale
 
+        # ----------------------------
+        # SPATIAL CASE
+        # ----------------------------
         else:
-            for i in range(n):
+
+            # Iterar SOLO sobre nodos existentes en w
+            for i in w.neighbors.keys():
+
+                neigh_ids = w.neighbors.get(i, [])
+                neigh_weights = w.weights.get(i, [])
+
                 neighs = []
                 weights = []
 
-                for j, w_ij in zip(w.neighbors[i], w.weights[i]):
+                for j, w_ij in zip(neigh_ids, neigh_weights):
                     if j == i:
                         continue
                     neighs.append(j)
@@ -73,6 +85,9 @@ class SpatialOutlierDetector:
 
                 z_scores[i] = (y[i] - loc) / scale
 
+        # --------------------------------
+        # Outlier detection
+        # --------------------------------
         outlier_mask = np.abs(z_scores) > z_threshold
 
         return {
