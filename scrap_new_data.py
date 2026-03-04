@@ -40,12 +40,12 @@ async def main():
         run_job(
             "https://www.argenprop.com/departamentos/alquiler/capital-federal?orden-masnuevos",
             "storage/data/arg_alquiler_data.csv",
-            99
+            20
         ),
         run_job(
             "https://www.argenprop.com/departamentos/venta/capital-federal?orden-masnuevos",
             "storage/data/arg_venta_data.csv",
-            99   
+            20  
         )
     )
 
