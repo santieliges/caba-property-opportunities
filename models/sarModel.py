@@ -45,3 +45,7 @@ class SpatialAutoregressiveModel(BaseModel):
 
         return self.model_.predy.flatten()
 
+    def summary(self):
+        if not self.is_fitted_:
+            raise ValueError("Model not fitted.")
+        return self.model_.summary
