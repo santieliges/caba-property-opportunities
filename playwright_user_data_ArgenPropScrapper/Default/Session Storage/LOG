@@ -1,0 +1,24 @@
+2026/03/14-17:13:13.130 75e4 Reusing MANIFEST C:\Users\sanel\OneDrive\PredictorPrecioMetroCuadradoAlquileres\playwright_user_data_ArgenPropScrapper\Default\Session Storage/MANIFEST-000001
+2026/03/14-17:13:13.132 75e4 Recovering log #33
+2026/03/14-17:13:13.135 75e4 Reusing old log C:\Users\sanel\OneDrive\PredictorPrecioMetroCuadradoAlquileres\playwright_user_data_ArgenPropScrapper\Default\Session Storage/000033.log 
+2026/03/14-17:16:15.746 122c Level-0 table #37: started
+2026/03/14-17:16:15.752 122c Level-0 table #37: 25793 bytes OK
+2026/03/14-17:16:15.756 122c Delete type=0 #33
+2026/03/14-17:43:15.737 122c Level-0 table #39: started
+2026/03/14-17:43:15.743 122c Level-0 table #39: 25371 bytes OK
+2026/03/14-17:43:15.745 122c Delete type=0 #36
+2026/03/14-17:43:15.747 122c Compacting 4@0 + 1@1 files
+2026/03/14-17:43:15.757 122c Generated table #40@0: 352 keys, 21484 bytes
+2026/03/14-17:43:15.757 122c Compacted 4@0 + 1@1 files => 21484 bytes
+2026/03/14-17:43:15.758 122c compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/03/14-17:43:15.759 122c Delete type=2 #30
+2026/03/14-17:43:15.760 122c Delete type=2 #32
+2026/03/14-17:43:15.760 122c Delete type=2 #34
+2026/03/14-17:43:15.760 122c Delete type=2 #37
+2026/03/14-17:43:15.760 122c Delete type=2 #39
+2026/03/14-17:57:15.751 122c Level-0 table #42: started
+2026/03/14-17:57:15.761 122c Level-0 table #42: 27829 bytes OK
+2026/03/14-17:57:15.764 122c Delete type=0 #38
+2026/03/14-18:10:15.746 122c Level-0 table #44: started
+2026/03/14-18:10:15.750 122c Level-0 table #44: 26402 bytes OK
+2026/03/14-18:10:15.752 122c Delete type=0 #41

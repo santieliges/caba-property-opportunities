@@ -2,7 +2,8 @@
 from .baseModel import BaseModel
 from sklearn.preprocessing import StandardScaler
 from mgwr.sel_bw import Sel_BW
-from mgwr.gwr import GWR
+from mgwr.gwr import GWR, _compute_betas_gwr
+from spglm.family import Gaussian
 import numpy as np
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 import numpy as np
@@ -29,7 +30,7 @@ class GWRModel(BaseModel):
 
         self.is_fitted_ = False
 
-    def fit(self, X, y, coords):
+    def fit(self, X, y, coords, bw=None):
         self.feature_names_ = X.columns
 
         self.scaler_ = StandardScaler()
@@ -39,13 +40,24 @@ class GWRModel(BaseModel):
         self.coords_train_ = np.asarray(coords).copy()
         self.y_train_ = np.asarray(y).reshape(-1, 1)
 
-        bw_selector = Sel_BW(
-            coords,
-            self.y_train_,
-            X_std,
-            spherical=False
-        )
-        self.bw_ = bw_selector.search()
+        # bw (bandwidth) controla el tamanio del vecindario local.
+        # Si fixed=False (default), bw es "cantidad de vecinos" (adaptativo).
+        # Si bw no se pasa, lo seleccionamos automaticamente con Sel_BW.
+        if bw is None:
+            bw_selector = Sel_BW(
+                coords,
+                self.y_train_,
+                X_std,
+                spherical=self.gwr_params.get("spherical", False),
+                fixed=self.gwr_params.get("fixed", False),
+                kernel=self.gwr_params.get("kernel", "bisquare"),
+            )
+            bw = bw_selector.search()
+
+        bw = int(bw)
+        if bw < 2:
+            raise ValueError(f"bw invalido: {bw}. Debe ser >= 2.")
+        self.bw_ = bw
 
         self.model_ = GWR(
             coords,
@@ -68,9 +80,36 @@ class GWRModel(BaseModel):
         X = X[self.feature_names_]
         X_std = self.scaler_.transform(X)
 
-        pred_results = self.model_.predict(coords, X_std)
+        coords = np.asarray(coords)
+        if coords.ndim != 2 or coords.shape[1] != 2:
+            raise ValueError(f"`coords` debe ser (n, 2). Recibido {coords.shape}.")
+        if len(coords) != len(X_std):
+            raise ValueError(
+                f"Mismatch entre filas: len(coords)={len(coords)} vs X.shape[0]={len(X_std)}. "
+                "Para predecir en una grilla, X y coords deben tener el mismo n."
+            )
 
-        return pred_results.predictions.flatten()
+        # Workaround mgwr 2.2.1: GWR.predict rompe si len(points) > n_train (indexa self.X/self.y por i).
+        if not isinstance(self.model_.family, Gaussian):
+            raise NotImplementedError("Este wrapper de predict solo soporta GWR Gaussiano.")
+
+        if self.model_.constant:
+            P = np.hstack([np.ones((len(X_std), 1)), X_std])
+        else:
+            P = X_std
+
+        orig_points = self.model_.points
+        try:
+            self.model_.points = coords
+            preds = np.empty((len(coords), 1), dtype=float)
+            for i in range(len(coords)):
+                wi = self.model_._build_wi(i, self.model_.bw).reshape(-1, 1)
+                betas, _ = _compute_betas_gwr(self.model_.y, self.model_.X, wi)
+                preds[i, 0] = float(np.dot(P[i], betas))
+        finally:
+            self.model_.points = orig_points
+
+        return preds.flatten()
 
     def in_sample_predictions(self):
         if not self.is_fitted_:

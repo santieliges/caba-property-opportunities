@@ -29,7 +29,7 @@ class RegressionKrigingModel(BaseModel):
             n_jobs=-1,
         )
 
-    def fit(self, X, y, coords):
+    def fit(self, X, y, coords, bw=None):
         self.feature_names_ = X.columns
 
         self.X_train_ = X.copy()
@@ -37,6 +37,14 @@ class RegressionKrigingModel(BaseModel):
         self.y_train_ = np.asarray(y).ravel()
 
         self.rf_ = self._build_rf()
+
+        # Para mantener una interfaz comun con otros modelos espaciales:
+        # si se pasa bw, lo interpretamos como cantidad de puntos cercanos usados por el kriging.
+        if bw is not None:
+            bw = int(bw)
+            if bw < 1:
+                raise ValueError(f"bw invalido: {bw}. Debe ser >= 1.")
+            self.kriging_params["n_closest_points"] = bw
 
         self.model_ = RegressionKriging(
             regression_model=self.rf_,

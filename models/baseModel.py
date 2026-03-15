@@ -14,7 +14,7 @@ class BaseModel:
         self.X_train_ = None
         self.y_train_ = None
 
-    def fit(self, X, y, coords):
+    def fit(self, X, y, coords, bw=None):
         raise NotImplementedError
 
     def predict(self, X, coords):

@@ -5,6 +5,10 @@ import requests
 from dataclasses import dataclass, asdict
 from typing import Optional
 import json
+import asyncio
+import random
+from datetime import datetime
+from scrapper.SosivaApiClient import SosivaApiClient, map_aviso_to_inmueble_fields
 
 # ──────────────────────────────
 # Data model
@@ -73,8 +77,17 @@ class InmuebleData:
 
     
 class ArgenPropScrapper(BaseScrapper):
-    def __init__(self, url_base: str, headless: bool = True):
+    def __init__(
+        self,
+        url_base: str,
+        headless: bool = True,
+        download_images: bool = True,
+        use_api_details: bool = True,
+    ):
         super().__init__(url_base=url_base, headless=headless)
+        self.download_images = download_images
+        self.use_api_details = use_api_details
+        self.sosiva_api = SosivaApiClient()
 
     # ──────────────────────────────
     # Page interactions 
@@ -142,10 +155,9 @@ class ArgenPropScrapper(BaseScrapper):
                         or await img.get_attribute("data-src")
                     )
 
-                imagen_path = (
-                    self.download_image(image_url, listing_id)
-                    if image_url and listing_id else None
-                )
+                imagen_path = None
+                if self.download_images and image_url and listing_id:
+                    imagen_path = self.download_image(image_url, listing_id)
 
                 listings.append({
                     "id": listing_id,
@@ -164,7 +176,10 @@ class ArgenPropScrapper(BaseScrapper):
     # ──────────────────────────────
 
     async def extract_detail_data(self, url):
-        await self.detail_page.goto(url)
+        response = await self.detail_page.goto(url)
+        if await self._looks_like_human_check(self.detail_page):
+            await self._pause_for_human_check(self.detail_page, url)
+            await self.detail_page.goto(url)
         await self.detail_page.wait_for_timeout(2000)
 
         precio, moneda, expensas = await self.extract_price_and_expenses()
@@ -201,14 +216,46 @@ class ArgenPropScrapper(BaseScrapper):
     # Orchestrator
     # ──────────────────────────────
 
-    async def extract_all_pages(self, n_pages=5):
+    async def extract_all_pages(self, n_pages=5, delay_s: float = 0.0, jitter_s: float = 0.0):
         inmuebles = []
 
         for page_num in range(1, n_pages + 1):
             print(f"Scraping página {page_num}")
 
-            await self.page.goto(f"{self.url_base}?pagina-{page_num}")
-            await self.page.wait_for_selector(".listing__item", timeout=10000)
+            sep = "&" if "?" in str(self.url_base) else "?"
+            list_url = f"{self.url_base}{sep}pagina-{page_num}"
+            response = await self.page.goto(list_url, wait_until="domcontentloaded")
+
+            if await self._looks_like_human_check(self.page):
+                await self._pause_for_human_check(self.page, list_url)
+                response = await self.page.goto(list_url, wait_until="domcontentloaded")
+
+            if response is not None and response.status == 429:
+                await asyncio.sleep(10.0)
+                response = await self.page.goto(list_url, wait_until="domcontentloaded")
+
+            try:
+                await self.page.wait_for_selector(".listing__item", timeout=30000)
+            except Exception:
+                if await self._looks_like_human_check(self.page):
+                    await self._pause_for_human_check(self.page, list_url)
+                    await self.page.goto(list_url, wait_until="domcontentloaded")
+                    await self.page.wait_for_selector(".listing__item", timeout=30000)
+                    await self.scroll_page()
+                    continue
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                os.makedirs("output/scrape_debug", exist_ok=True)
+                try:
+                    await self.page.screenshot(path=f"output/scrape_debug/list_{ts}.png", full_page=True)
+                except Exception:
+                    pass
+                try:
+                    html = await self.page.content()
+                    with open(f"output/scrape_debug/list_{ts}.html", "w", encoding="utf-8") as f:
+                        f.write(html)
+                except Exception:
+                    pass
+                raise
             await self.scroll_page()
 
             listings = await self.extract_listings_from_page()
@@ -216,7 +263,17 @@ class ArgenPropScrapper(BaseScrapper):
 
             for base in listings:
                 try:
-                    detail = await self.extract_detail_data(base["url"])
+                    detail = None
+                    if self.use_api_details and base.get("id") is not None:
+                        api_res = await asyncio.to_thread(self.sosiva_api.get_aviso, int(base["id"]))
+                        if api_res.status_code == 200 and api_res.json_data:
+                            detail = map_aviso_to_inmueble_fields(api_res.json_data)
+                        elif api_res.status_code in (404, 410):
+                            # No disponible: saltar
+                            continue
+
+                    if detail is None:
+                        detail = await self.extract_detail_data(base["url"])
 
                     inmuebles.append(
                         InmuebleData(
@@ -230,6 +287,9 @@ class ArgenPropScrapper(BaseScrapper):
 
                 except Exception as e:
                     print(f"Error en {base['url']}: {e}")
+
+                if delay_s or jitter_s:
+                    await asyncio.sleep(delay_s + (random.random() * jitter_s))
 
         return inmuebles
 

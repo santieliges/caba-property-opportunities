@@ -46,7 +46,7 @@ class AmbitoDolarScrapper(BaseScrapper):
         for nombre, slug in self.tipos_dolar.items():
             url = f"{self.url_base}/{slug}.html"
 
-            page = await self.browser.new_page()
+            page = await self.context.new_page() if self.context else await self.browser.new_page()
             await page.goto(url, wait_until="domcontentloaded")
 
             compra_txt = await self.safe_text(
