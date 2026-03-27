@@ -1,20 +1,105 @@
-2026/03/14-02:50:58.820 41ac Reusing MANIFEST C:\Users\sanel\OneDrive\PredictorPrecioMetroCuadradoAlquileres\playwright_user_data_ArgenPropScrapper\Default\Session Storage/MANIFEST-000001
-2026/03/14-02:50:58.822 41ac Recovering log #25
-2026/03/14-02:50:58.822 41ac Level-0 table #28: started
-2026/03/14-02:50:58.827 41ac Level-0 table #28: 26966 bytes OK
-2026/03/14-02:50:58.832 41ac Delete type=0 #25
-2026/03/14-02:50:58.834 4808 Compacting 4@0 + 1@1 files
-2026/03/14-02:50:58.845 4808 Generated table #30@0: 286 keys, 14233 bytes
-2026/03/14-02:50:58.846 4808 Compacted 4@0 + 1@1 files => 14233 bytes
-2026/03/14-02:50:58.848 4808 compacted to: files[ 0 1 1 0 0 0 0 ]
-2026/03/14-02:50:58.850 4808 Delete type=2 #18
-2026/03/14-02:50:58.850 4808 Delete type=2 #20
-2026/03/14-02:50:58.850 4808 Delete type=2 #23
-2026/03/14-02:50:58.850 4808 Delete type=2 #26
-2026/03/14-02:50:58.851 4808 Delete type=2 #28
-2026/03/14-03:25:00.880 4808 Level-0 table #32: started
-2026/03/14-03:25:00.890 4808 Level-0 table #32: 26229 bytes OK
-2026/03/14-03:25:00.893 4808 Delete type=0 #29
-2026/03/14-03:41:00.960 4808 Level-0 table #34: started
-2026/03/14-03:41:00.971 4808 Level-0 table #34: 28040 bytes OK
-2026/03/14-03:41:00.975 4808 Delete type=0 #31
+2026/03/21-20:49:00.430 6268 Reusing MANIFEST C:\Users\sanel\OneDrive\PredictorPrecioMetroCuadradoAlquileres\playwright_user_data_ArgenPropScrapper\Default\Session Storage/MANIFEST-000001
+2026/03/21-20:49:00.434 6268 Recovering log #252
+2026/03/21-20:49:00.438 6268 Reusing old log C:\Users\sanel\OneDrive\PredictorPrecioMetroCuadradoAlquileres\playwright_user_data_ArgenPropScrapper\Default\Session Storage/000252.log 
+2026/03/21-21:12:01.299 4928 Level-0 table #256: started
+2026/03/21-21:12:01.306 4928 Level-0 table #256: 25229 bytes OK
+2026/03/21-21:12:01.308 4928 Delete type=0 #252
+2026/03/21-21:31:40.358 4928 Level-0 table #258: started
+2026/03/21-21:31:40.364 4928 Level-0 table #258: 30550 bytes OK
+2026/03/21-21:31:40.366 4928 Delete type=0 #255
+2026/03/21-21:31:40.367 4928 Compacting 4@0 + 1@1 files
+2026/03/21-21:31:40.379 4928 Generated table #259@0: 947 keys, 77377 bytes
+2026/03/21-21:31:40.379 4928 Compacted 4@0 + 1@1 files => 77377 bytes
+2026/03/21-21:31:40.380 4928 compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/03/21-21:31:40.381 4928 Delete type=2 #249
+2026/03/21-21:31:40.381 4928 Delete type=2 #251
+2026/03/21-21:31:40.381 4928 Delete type=2 #253
+2026/03/21-21:31:40.381 4928 Delete type=2 #256
+2026/03/21-21:31:40.381 4928 Delete type=2 #258
+2026/03/21-21:45:01.327 4928 Level-0 table #261: started
+2026/03/21-21:45:01.338 4928 Level-0 table #261: 27908 bytes OK
+2026/03/21-21:45:01.342 4928 Delete type=0 #257
+2026/03/21-21:57:01.338 4928 Level-0 table #263: started
+2026/03/21-21:57:01.349 4928 Level-0 table #263: 39049 bytes OK
+2026/03/21-21:57:01.354 4928 Delete type=0 #260
+2026/03/21-22:07:01.339 4928 Level-0 table #265: started
+2026/03/21-22:07:01.349 4928 Level-0 table #265: 37484 bytes OK
+2026/03/21-22:07:01.354 4928 Delete type=0 #262
+2026/03/21-22:16:01.356 4928 Level-0 table #267: started
+2026/03/21-22:16:01.366 4928 Level-0 table #267: 36345 bytes OK
+2026/03/21-22:16:01.370 4928 Delete type=0 #264
+2026/03/21-22:16:01.371 4928 Compacting 4@0 + 1@1 files
+2026/03/21-22:16:01.387 4928 Generated table #268@0: 961 keys, 78834 bytes
+2026/03/21-22:16:01.387 4928 Compacted 4@0 + 1@1 files => 78834 bytes
+2026/03/21-22:16:01.388 4928 compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/03/21-22:16:01.390 4928 Delete type=2 #259
+2026/03/21-22:16:01.391 4928 Delete type=2 #261
+2026/03/21-22:16:01.391 4928 Delete type=2 #263
+2026/03/21-22:16:01.391 4928 Delete type=2 #265
+2026/03/21-22:16:01.391 4928 Delete type=2 #267
+2026/03/21-22:25:01.350 4928 Level-0 table #270: started
+2026/03/21-22:25:01.360 4928 Level-0 table #270: 34759 bytes OK
+2026/03/21-22:25:01.363 4928 Delete type=0 #266
+2026/03/21-22:32:24.184 4928 Level-0 table #272: started
+2026/03/21-22:32:24.198 4928 Level-0 table #272: 33668 bytes OK
+2026/03/21-22:32:24.200 4928 Delete type=0 #269
+2026/03/21-22:39:01.357 4928 Level-0 table #274: started
+2026/03/21-22:39:01.368 4928 Level-0 table #274: 31505 bytes OK
+2026/03/21-22:39:01.375 4928 Delete type=0 #271
+2026/03/21-22:46:01.369 4928 Level-0 table #276: started
+2026/03/21-22:46:01.380 4928 Level-0 table #276: 32236 bytes OK
+2026/03/21-22:46:01.384 4928 Delete type=0 #273
+2026/03/21-22:46:01.385 4928 Compacting 4@0 + 1@1 files
+2026/03/21-22:46:01.397 4928 Generated table #277@0: 970 keys, 79649 bytes
+2026/03/21-22:46:01.397 4928 Compacted 4@0 + 1@1 files => 79649 bytes
+2026/03/21-22:46:01.399 4928 compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/03/21-22:46:01.401 4928 Delete type=2 #268
+2026/03/21-22:46:01.401 4928 Delete type=2 #270
+2026/03/21-22:46:01.401 4928 Delete type=2 #272
+2026/03/21-22:46:01.401 4928 Delete type=2 #274
+2026/03/21-22:46:01.401 4928 Delete type=2 #276
+2026/03/21-22:53:01.362 4928 Level-0 table #279: started
+2026/03/21-22:53:01.372 4928 Level-0 table #279: 32806 bytes OK
+2026/03/21-22:53:01.376 4928 Delete type=0 #275
+2026/03/21-22:59:01.371 4928 Level-0 table #281: started
+2026/03/21-22:59:01.380 4928 Level-0 table #281: 30067 bytes OK
+2026/03/21-22:59:01.383 4928 Delete type=0 #278
+2026/03/21-23:05:01.368 4928 Level-0 table #283: started
+2026/03/21-23:05:01.377 4928 Level-0 table #283: 31513 bytes OK
+2026/03/21-23:05:01.382 4928 Delete type=0 #280
+2026/03/21-23:11:01.378 4928 Level-0 table #285: started
+2026/03/21-23:11:01.389 4928 Level-0 table #285: 31692 bytes OK
+2026/03/21-23:11:01.394 4928 Delete type=0 #282
+2026/03/21-23:11:01.395 4928 Compacting 4@0 + 1@1 files
+2026/03/21-23:11:01.408 4928 Generated table #286@0: 977 keys, 80453 bytes
+2026/03/21-23:11:01.408 4928 Compacted 4@0 + 1@1 files => 80453 bytes
+2026/03/21-23:11:01.409 4928 compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/03/21-23:11:01.411 4928 Delete type=2 #277
+2026/03/21-23:11:01.411 4928 Delete type=2 #279
+2026/03/21-23:11:01.411 4928 Delete type=2 #281
+2026/03/21-23:11:01.411 4928 Delete type=2 #283
+2026/03/21-23:11:01.411 4928 Delete type=2 #285
+2026/03/21-23:16:22.460 4928 Level-0 table #288: started
+2026/03/21-23:16:22.470 4928 Level-0 table #288: 28277 bytes OK
+2026/03/21-23:16:22.472 4928 Delete type=0 #284
+2026/03/21-23:22:01.382 4928 Level-0 table #290: started
+2026/03/21-23:22:01.392 4928 Level-0 table #290: 28967 bytes OK
+2026/03/21-23:22:01.396 4928 Delete type=0 #287
+2026/03/21-23:27:34.799 6268 Level-0 table #292: started
+2026/03/21-23:27:34.811 6268 Level-0 table #292: 29093 bytes OK
+2026/03/21-23:27:34.815 6268 Delete type=0 #289
+2026/03/21-23:33:01.388 4928 Level-0 table #294: started
+2026/03/21-23:33:01.398 4928 Level-0 table #294: 29656 bytes OK
+2026/03/21-23:33:01.401 4928 Delete type=0 #291
+2026/03/21-23:33:01.402 4928 Compacting 4@0 + 1@1 files
+2026/03/21-23:33:01.411 4928 Generated table #295@0: 982 keys, 80755 bytes
+2026/03/21-23:33:01.411 4928 Compacted 4@0 + 1@1 files => 80755 bytes
+2026/03/21-23:33:01.413 4928 compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/03/21-23:33:01.416 4928 Delete type=2 #286
+2026/03/21-23:33:01.416 4928 Delete type=2 #288
+2026/03/21-23:33:01.416 4928 Delete type=2 #290
+2026/03/21-23:33:01.416 4928 Delete type=2 #292
+2026/03/21-23:33:01.416 4928 Delete type=2 #294
+2026/03/21-23:38:01.399 4928 Level-0 table #297: started
+2026/03/21-23:38:01.410 4928 Level-0 table #297: 30590 bytes OK
+2026/03/21-23:38:01.414 4928 Delete type=0 #293

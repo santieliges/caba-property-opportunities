@@ -11,6 +11,7 @@ class SpatialOutlierDetector:
         y,
         w=None,
         z_threshold=3.0,
+        z_threshold_min=None,
         min_neighbors=3,
         robust=True
     ):
@@ -21,6 +22,14 @@ class SpatialOutlierDetector:
 
         If w is provided -> spatial (local).
         If w is None     -> global (non-spatial).
+
+        Parameters
+        ----------
+        z_threshold : float
+            Umbral "extremo": |z| > z_threshold.
+        z_threshold_min : float | None
+            Si se provee, también devuelve un segundo grupo de outliers "moderados":
+            z_threshold_min <= |z| <= z_threshold.
         """
 
         y = np.asarray(y).ravel()
@@ -34,8 +43,9 @@ class SpatialOutlierDetector:
         # ----------------------------
         if w is None:
             if robust:
-                loc = self.LOO_median(y)
-                scale = self.LOO_mad(np.abs(y - loc))
+                # Global robust: median / MAD (normalizado)
+                loc = np.median(y)
+                scale = 1.4826 * np.median(np.abs(y - loc))
             else:
                 loc = np.mean(y)
                 scale = np.std(y, ddof=1)
@@ -88,16 +98,42 @@ class SpatialOutlierDetector:
         # --------------------------------
         # Outlier detection
         # --------------------------------
-        outlier_mask = np.abs(z_scores) > z_threshold
+        if z_threshold_min is not None and z_threshold_min >= z_threshold:
+            raise ValueError("z_threshold_min debe ser menor que z_threshold")
+
+        abs_z = np.abs(z_scores)
+        outlier_mask = abs_z > z_threshold
+
+        borderline_outliers_mask = None
+        borderline_outliers_idx = None
+        borderline_high_outliers_mask = None
+        borderline_high_outliers_idx = None
+        borderline_low_outliers_mask = None
+        borderline_low_outliers_idx = None
+
+        if z_threshold_min is not None:
+            borderline_outliers_mask = (abs_z >= z_threshold_min) & (abs_z <= z_threshold)
+            borderline_outliers_idx = np.where(borderline_outliers_mask)[0]
+            borderline_high_outliers_mask = (z_scores >= z_threshold_min) & (z_scores <= z_threshold)
+            borderline_high_outliers_idx = np.where(borderline_high_outliers_mask)[0]
+            borderline_low_outliers_mask = (z_scores <= -z_threshold_min) & (z_scores >= -z_threshold)
+            borderline_low_outliers_idx = np.where(borderline_low_outliers_mask)[0]
 
         return {
             "z_scores": z_scores,
             "outlier_mask": outlier_mask,
             "outlier_idx": np.where(outlier_mask)[0],
+            "inlier_mask": ~outlier_mask,
             "high_outliers_mask": z_scores > z_threshold,
             "high_outliers_idx": np.where(z_scores > z_threshold)[0],
             "low_outliers_mask": z_scores < -z_threshold,
             "low_outliers_idx": np.where(z_scores < -z_threshold)[0],
+            "borderline_outliers_mask": borderline_outliers_mask,
+            "borderline_outliers_idx": borderline_outliers_idx,
+            "borderline_high_outliers_mask": borderline_high_outliers_mask,
+            "borderline_high_outliers_idx": borderline_high_outliers_idx,
+            "borderline_low_outliers_mask": borderline_low_outliers_mask,
+            "borderline_low_outliers_idx": borderline_low_outliers_idx,
         }
 
 

@@ -43,10 +43,11 @@ async def main():
     #     20
     # )
     await run_job(
-        "https://www.argenprop.com/departamentos/venta/chacarita-o-colegiales",
+        "https://www.argenprop.com/departamentos/venta/almagro-o-boedo-o-caballito?orden-masnuevos",
         "storage/data/arg_venta_data.csv",
-        20
+        60
     )
+    
 
 if __name__ == "__main__":
     asyncio.run(main())

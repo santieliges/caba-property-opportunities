@@ -11,30 +11,32 @@ class SpatialAutoregressiveModel(BaseModel):
         super().__init__()
         self.k = k
         self.w = None
+        self.nbrs_ = None
 
     def _build_weights(self, coords):
         w = KNN.from_array(coords, k=self.k)
         w.transform = 'r'
         return w
 
-    def fit(self, X, y, coords, bw=None):
+    def fit(self, X, y, coords, k=None):
         self.feature_names_ = list(X.columns)
         self.X_train_ = X.copy()
         self.coords_train_ = np.asarray(coords).copy()
         self.y_train_ = np.asarray(y).reshape(-1, 1)
         
-        # bw se interpreta como cantidad de vecinos para construir la matriz de pesos (KNN).
+        # k se interpreta como cantidad de vecinos para construir la matriz de pesos (KNN).
         # Si no se pasa, se usa self.k (configurado en __init__).
-        if bw is not None:
-            bw = int(bw)
-            if bw < 1:
-                raise ValueError(f"bw invalido: {bw}. Debe ser >= 1.")
-            self.k = bw
+        if k is not None:
+            k = int(k)
+            if k < 1:
+                raise ValueError(f"k invalido: {k}. Debe ser >= 1.")
+            self.k = k
 
         y = np.asarray(y).reshape(-1, 1)
         X = np.asarray(X)
         
         self.w = self._build_weights(coords)
+        self.nbrs_ = NearestNeighbors(n_neighbors=self.k).fit(self.coords_train_)
 
         self.model_ = ML_Lag(
             y,
@@ -62,9 +64,11 @@ class SpatialAutoregressiveModel(BaseModel):
         X_o = X[self.feature_names_]
 
         coords_o = np.asarray(coord)
-        nbrs = NearestNeighbors(n_neighbors=self.k).fit(self.coords_train_)
-        distances, indices = nbrs.kneighbors(coords_o)
-        w_o = np.zeros((len(coords_o), len(self.coords_train_)))
+        if coords_o.ndim != 2 or coords_o.shape[1] != 2:
+            raise ValueError(f"`coord(s)` debe ser (n, 2). Recibido {coords_o.shape}.")
+        if self.nbrs_ is None:
+            self.nbrs_ = NearestNeighbors(n_neighbors=self.k).fit(self.coords_train_)
+        _, indices = self.nbrs_.kneighbors(coords_o)
 
         # ML_Lag.betas incluye: [const] + betas_X + [rho]. Para el termino lineal, excluimos rho.
         n_features = len(self.feature_names_)
@@ -72,21 +76,34 @@ class SpatialAutoregressiveModel(BaseModel):
         intercept = float(np.asarray(self.model_.betas[0]).ravel()[0])
         linear_interpolation = np.asarray(X_o) @ beta_x + intercept
 
-        # Pesos out-of-sample: conectan el punto nuevo con sus k vecinos en train (fila-estandarizado).
-        for row_idx, neigh_idx in enumerate(indices):
-            w_o[row_idx, neigh_idx] = 1.0 / len(neigh_idx)
+        y_neighbors = self.y_train_.reshape(-1)[indices]  # (n, k)
+        spatial_lag = float(self.model_.rho) * y_neighbors.mean(axis=1).reshape(-1, 1)
 
-        spatial_lag = float(self.model_.rho) * (w_o @ self.y_train_)
-
-        Y_pred = linear_interpolation + spatial_lag
-        return Y_pred
+        y_pred = linear_interpolation + spatial_lag
+        return y_pred
     
     def predict(self, X, coords):
-        preds = [
-            self.predict_one_out_of_sample_point(X.iloc[i:i+1], coords[i].reshape(1, -1))
-            for i in range(len(X))
-        ]
-        return np.array(preds).reshape(-1, 1)
+        if not self.is_fitted_:
+            raise RuntimeError("El modelo no está entrenado")
+
+        X_o = X[self.feature_names_]
+        coords_o = np.asarray(coords)
+        if coords_o.ndim != 2 or coords_o.shape[1] != 2:
+            raise ValueError(f"`coords` debe ser (n, 2). Recibido {coords_o.shape}.")
+        if self.nbrs_ is None:
+            self.nbrs_ = NearestNeighbors(n_neighbors=self.k).fit(self.coords_train_)
+
+        _, indices = self.nbrs_.kneighbors(coords_o)
+
+        n_features = len(self.feature_names_)
+        beta_x = np.asarray(self.model_.betas[1:1 + n_features])  # (n_features, 1)
+        intercept = float(np.asarray(self.model_.betas[0]).ravel()[0])
+        linear_interpolation = np.asarray(X_o) @ beta_x + intercept  # (n, 1)
+
+        y_neighbors = self.y_train_.reshape(-1)[indices]  # (n, k)
+        spatial_lag = float(self.model_.rho) * y_neighbors.mean(axis=1).reshape(-1, 1)
+
+        return (linear_interpolation + spatial_lag).reshape(-1, 1)
     
 
     def summary(self):

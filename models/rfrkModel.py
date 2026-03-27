@@ -1,10 +1,8 @@
 from .baseModel import BaseModel
 from pykrige.rk import RegressionKriging
-from libpysal.weights import KNN
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV, KFold
-from typing import Optional
-from sklearn.metrics import mean_squared_error, mean_absolute_error
+from sklearn.metrics import mean_squared_error
 import numpy as np
 
 class RegressionKrigingModel(BaseModel):
@@ -29,7 +27,30 @@ class RegressionKrigingModel(BaseModel):
             n_jobs=-1,
         )
 
-    def fit(self, X, y, coords, bw=None):
+    def fit(
+        self,
+        X,
+        y,
+        coords,
+        n_closest_points=None,
+        method=None,
+        variogram_model=None,
+        variogram_parameters=None,
+        nlags=None,
+        weight=None,
+        exact_values=None,
+        pseudo_inv=None,
+        pseudo_inv_type=None,
+        variogram_function=None,
+        anisotropy_scaling=None,
+        anisotropy_angle=None,
+        enable_statistics=None,
+        coordinates_type=None,
+        drift_terms=None,
+        point_drift=None,
+        ext_drift_grid=None,
+        functional_drift=None,
+    ):
         self.feature_names_ = X.columns
 
         self.X_train_ = X.copy()
@@ -38,17 +59,55 @@ class RegressionKrigingModel(BaseModel):
 
         self.rf_ = self._build_rf()
 
-        # Para mantener una interfaz comun con otros modelos espaciales:
-        # si se pasa bw, lo interpretamos como cantidad de puntos cercanos usados por el kriging.
-        if bw is not None:
-            bw = int(bw)
-            if bw < 1:
-                raise ValueError(f"bw invalido: {bw}. Debe ser >= 1.")
-            self.kriging_params["n_closest_points"] = bw
+        rk_kwargs = dict(self.kriging_params)
+        rk_kwargs.pop("regression_model", None)
+
+        if n_closest_points is not None:
+            n_closest_points = int(n_closest_points)
+            if n_closest_points < 1:
+                raise ValueError(
+                    f"n_closest_points invalido: {n_closest_points}. Debe ser >= 1."
+                )
+            rk_kwargs["n_closest_points"] = n_closest_points
+
+        if method is not None:
+            rk_kwargs["method"] = method
+        if variogram_model is not None:
+            rk_kwargs["variogram_model"] = variogram_model
+        if variogram_parameters is not None:
+            rk_kwargs["variogram_parameters"] = variogram_parameters
+        if nlags is not None:
+            rk_kwargs["nlags"] = nlags
+        if weight is not None:
+            rk_kwargs["weight"] = weight
+        if exact_values is not None:
+            rk_kwargs["exact_values"] = exact_values
+        if pseudo_inv is not None:
+            rk_kwargs["pseudo_inv"] = pseudo_inv
+        if pseudo_inv_type is not None:
+            rk_kwargs["pseudo_inv_type"] = pseudo_inv_type
+        if variogram_function is not None:
+            rk_kwargs["variogram_function"] = variogram_function
+        if anisotropy_scaling is not None:
+            rk_kwargs["anisotropy_scaling"] = anisotropy_scaling
+        if anisotropy_angle is not None:
+            rk_kwargs["anisotropy_angle"] = anisotropy_angle
+        if enable_statistics is not None:
+            rk_kwargs["enable_statistics"] = enable_statistics
+        if coordinates_type is not None:
+            rk_kwargs["coordinates_type"] = coordinates_type
+        if drift_terms is not None:
+            rk_kwargs["drift_terms"] = drift_terms
+        if point_drift is not None:
+            rk_kwargs["point_drift"] = point_drift
+        if ext_drift_grid is not None:
+            rk_kwargs["ext_drift_grid"] = ext_drift_grid
+        if functional_drift is not None:
+            rk_kwargs["functional_drift"] = functional_drift
 
         self.model_ = RegressionKriging(
             regression_model=self.rf_,
-            n_closest_points=self.kriging_params.get("n_closest_points", 10),
+            **rk_kwargs,
         )
 
         self.model_.fit(self.X_train_, self.coords_train_, self.y_train_)
