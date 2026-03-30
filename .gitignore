@@ -2,6 +2,17 @@ __pycache__/
 *.pyc
 .env
 .venv/
+venv/
 .ipynb_checkpoints/
 output/
 *.csv
+update_data_scraper.log
+playwright_user_data_*/
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
