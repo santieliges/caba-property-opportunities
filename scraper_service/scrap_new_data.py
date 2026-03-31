@@ -41,7 +41,7 @@ async def run_job(url, csv_path, n_pages=5):
 
 async def main():
     await run_job(
-        "https://www.argenprop.com/departamentos/venta/almagro-o-boedo-o-caballito?orden-masnuevos",
+        "https://www.argenprop.com/departamentos/venta/liniers-o-mataderos-o-parque-avellaneda",
         "scraper_service/storage/data/arg_venta_data.csv",
         60,
     )
