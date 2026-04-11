@@ -1,3 +1,3 @@
-from scraper_service.sync.sync import Synchronizer
+from sync.sync import Synchronizer
 
 __all__ = ["Synchronizer"]

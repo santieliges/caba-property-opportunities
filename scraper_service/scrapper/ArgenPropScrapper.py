@@ -8,8 +8,8 @@ from typing import Optional
 
 import requests
 
-from scraper_service.scrapper.Scrapper import BaseScrapper
-from scraper_service.scrapper.SosivaApiClient import (
+from scrapper.Scrapper import BaseScrapper
+from scrapper.SosivaApiClient import (
     SosivaApiClient,
     map_aviso_to_inmueble_fields,
 )
@@ -56,7 +56,13 @@ class InmuebleData:
     @staticmethod
     def _to_int(value):
         try:
-            return int(value) if value is not None else None
+            if value is None:
+                return None
+            if isinstance(value, str):
+                digits = ''.join(ch for ch in value if ch.isdigit())
+                if digits:
+                    return int(digits)
+            return int(value)
         except Exception:
             return None
 
@@ -183,6 +189,10 @@ class ArgenPropScrapper(BaseScrapper):
             "longitud": lon,
         }
 
+        antiguedad_val = result["antiguedad"]
+        print(f"Page antiguedad for {url}: {antiguedad_val} (from features: {features.get('antiguedad')}, edificio: {edificio.get('antiguedad')})")
+        return result
+
     async def extract_all_pages(self, n_pages=5, delay_s: float = 0.0, jitter_s: float = 0.0):
         inmuebles = []
 
@@ -239,11 +249,13 @@ class ArgenPropScrapper(BaseScrapper):
                         api_res = await asyncio.to_thread(self.sosiva_api.get_aviso, int(base["id"]))
                         if api_res.status_code == 200 and api_res.json_data:
                             detail = map_aviso_to_inmueble_fields(api_res.json_data)
+                            print(f"Using API for {base['id']}, antiguedad: {detail.get('antiguedad')}")
                         elif api_res.status_code in (404, 410):
                             continue
 
                     if detail is None:
                         detail = await self.extract_detail_data(base["url"])
+                        print(f"Using page for {base['id']}, antiguedad: {detail.get('antiguedad')}")
 
                     inmuebles.append(
                         InmuebleData(

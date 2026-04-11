@@ -70,6 +70,13 @@ def map_aviso_to_inmueble_fields(aviso: Dict[str, Any]) -> Dict[str, Any]:
     lat = aviso.get("Direccion_Latitud_d")
     lon = aviso.get("Direccion_Longitud_d")
 
+    antiguedad_raw = get_antiguedad(aviso=aviso)
+    antiguedad = _parse_antiguedad(antiguedad_raw)
+    estado_edificio = aviso.get("EstadoEdificio_t")
+    estado = aviso.get("Estado_t")
+    disposicion = aviso.get("Disposicion_t")
+    orientacion = aviso.get("Orientacion_t")
+
     return {
         "precio": precio,
         "moneda": moneda,
@@ -77,18 +84,19 @@ def map_aviso_to_inmueble_fields(aviso: Dict[str, Any]) -> Dict[str, Any]:
         "area_m2_cubierta": area_cubierta,
         "area_m2_descubierta": area_desc,
         "area_m2_total": area_total,
-        "antiguedad": aviso.get("Antiguedad_i"),
-        "estado_edificio": aviso.get("EstadoEdificio_t"),
+        "antiguedad": antiguedad,
+        "estado_edificio": estado_edificio,
         "ambientes": ambientes,
         "dormitorios": dormitorios,
         "banos": banos,
-        "estado": aviso.get("Estado_t"),
-        "disposicion": aviso.get("Disposicion_t"),
-        "orientacion": aviso.get("Orientacion_t"),
+        "estado": estado,
+        "disposicion": disposicion,
+        "orientacion": orientacion,
         "cocheras": cocheras,
         "latitud": lat,
         "longitud": lon,
     }
+
 
 
 def load_headers_from_json(path: str) -> Dict[str, str]:
@@ -97,3 +105,44 @@ def load_headers_from_json(path: str) -> Dict[str, str]:
     if not isinstance(data, dict):
         raise ValueError('Headers JSON debe ser un objeto {"Header": "valor", ...}')
     return {str(key): str(value) for key, value in data.items()}
+
+### helpers
+
+def get_antiguedad(aviso):
+    # 1. DatosComunes (mejor fuente)
+    for item in aviso.get("DatosComunes_s", []):
+        if item.get("TipoDatoComun") == "ANTIGUEDAD":
+            return item.get("Valor")
+
+    # 2. Secciones (fallback)
+    for sec in aviso.get("Secciones_s", {}).get("Secciones", []):
+        if sec.get("Nombre") == "Características":
+            for item in sec.get("Items", []):
+                if item.get("Nombre") in ["Antiguedad", "Antigüedad"]:
+                    return item.get("Valor")
+
+    # 3. campo directo (último fallback)
+    return aviso.get("Antiguedad_i")
+
+
+def _parse_antiguedad(value):
+    """Convierte valores tipo "28 años" o "A Estrenar" a enteros razonables.
+
+    - Si hay dígitos, devuelve ese número (int).
+    - Si dice "A Estrenar" o similar, devuelve 0 (o None si prefieres); elegimos 0 para conservar señal.
+    - Si no se puede interpretar, devuelve None.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return int(value)
+        except Exception:
+            return None
+    if isinstance(value, str):
+        digits = ''.join(ch for ch in value if ch.isdigit())
+        if digits:
+            return int(digits)
+        if value.strip().lower() in {"a estrenar", "estrenar", "a estrenar."}:
+            return 0
+    return None

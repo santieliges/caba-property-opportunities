@@ -2,14 +2,14 @@ from datetime import datetime
 
 import pandas as pd
 
-from scraper_service.storage.storage import Storage
+from storage.storage import Storage
 
 
 class Synchronizer:
     def __init__(
         self,
         storage: Storage,
-        BUSINESS_FIELDS={"precio", "moneda", "ambientes", "expensas", "latitud", "longitud"},
+        BUSINESS_FIELDS={"precio", "moneda", "ambientes", "expensas", "latitud", "longitud", "antiguedad"},
     ):
         self.storage = storage
         self.BUSINESS_FIELDS = BUSINESS_FIELDS

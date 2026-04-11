@@ -2,11 +2,11 @@ import asyncio
 import os
 import traceback
 
-from scraper_service.routineJob.routineJob import RoutineJob
-from scraper_service.scrapper.ArgenPropScrapper import ArgenPropScrapper
-from scraper_service.storage.storage import CSVStorage
-from scraper_service.sync.sync import Synchronizer
-from scraper_service.updater.updater import Updater
+from routineJob.routineJob import RoutineJob
+from scrapper.ArgenPropScrapper import ArgenPropScrapper
+from storage.storage import CSVStorage
+from sync.sync import Synchronizer
+from updater.updater import Updater
 
 
 def env_flag(name: str, default: bool) -> bool:
@@ -41,7 +41,7 @@ async def run_job(url, csv_path, n_pages=5):
 
 async def main():
     await run_job(
-        "https://www.argenprop.com/departamentos/venta/liniers-o-mataderos-o-parque-avellaneda",
+        "https://www.argenprop.com/departamentos/venta/capital-federal?orden-masnuevos",
         "scraper_service/storage/data/arg_venta_data.csv",
         60,
     )

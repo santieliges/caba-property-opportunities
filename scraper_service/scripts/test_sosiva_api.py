@@ -2,7 +2,7 @@ import argparse
 import os
 import json
 
-from scraper_service.scrapper.SosivaApiClient import (
+from scrapper.SosivaApiClient import (
     SosivaApiClient,
     load_headers_from_json,
 )

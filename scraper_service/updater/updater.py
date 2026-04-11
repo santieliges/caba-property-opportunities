@@ -1,7 +1,7 @@
 import asyncio
 
-from scraper_service.scrapper.ArgenPropScrapper import InmuebleData
-from scraper_service.scrapper.SosivaApiClient import (
+from scrapper.ArgenPropScrapper import InmuebleData
+from scrapper.SosivaApiClient import (
     SosivaApiClient,
     map_aviso_to_inmueble_fields,
 )
@@ -19,6 +19,7 @@ class Updater:
         api_res = await asyncio.to_thread(self.sosiva_api.get_aviso, int(entry_id))
         if api_res.status_code == 200 and api_res.json_data:
             detail = map_aviso_to_inmueble_fields(api_res.json_data)
+            print(f"Update API for {entry_id}, antiguedad: {detail.get('antiguedad')}")
             return InmuebleData(
                 id=entry_id,
                 url=url,
