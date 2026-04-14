@@ -154,18 +154,27 @@ def build_processed_dataset(
     config: DatasetConfig,
     barrios_path: str | Path,
     dollar_path: str | Path,
+    verbose: bool = True,
 ) -> pd.DataFrame:
     raw_path = Path(config.raw_path)
     output_path = Path(config.output_path)
     barrios_path = Path(barrios_path)
     dollar_path = Path(dollar_path)
 
+    stage_counts = []
+
     df = pd.read_csv(raw_path)
+    stage_counts.append(("raw", len(df)))
+
     if config.jitter_duplicate_coordinates:
         df = _jitter_duplicate_coordinates(df)
+        stage_counts.append(("after_jitter", len(df)))
 
     gdf = _build_geodataframe(df, barrios_path)
+    stage_counts.append(("after_spatial_join", len(gdf)))
+
     gdf = _apply_fixed_cleaning_rules(gdf)
+    stage_counts.append(("after_clean_rules", len(gdf)))
 
     official_rate = _load_official_dollar_rate(dollar_path)
     gdf = _convert_prices(
@@ -174,11 +183,18 @@ def build_processed_dataset(
         official_dollar_rate=official_rate,
         mode=config.convert_mode,
     )
+    stage_counts.append(("after_currency_convert", len(gdf)))
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     df_out = pd.DataFrame(gdf.drop(columns="geometry"))
     df_out.to_csv(output_path, index=False)
+
+    if verbose:
+        print(f"[build_processed_dataset:{config.name}] registros por etapa:")
+        for name, count in stage_counts:
+            print(f"  - {name}: {count}")
+
     return df_out
 
 
@@ -196,7 +212,7 @@ def build_venta_processed_dataset(
             output_path=Path(output_path),
             convert_from_currency="ARS",
             convert_mode="divide",
-            jitter_duplicate_coordinates=True,
+            jitter_duplicate_coordinates=False,  # No jitter en preprocessing; hacerlo en notebooks si se necesita
         ),
         barrios_path=barrios_path,
         dollar_path=dollar_path,

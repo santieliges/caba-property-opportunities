@@ -43,7 +43,7 @@ async def main():
     await run_job(
         "https://www.argenprop.com/departamentos/venta/capital-federal?orden-masnuevos",
         "scraper_service/storage/data/arg_venta_data.csv",
-        60,
+        30,
     )
 
 

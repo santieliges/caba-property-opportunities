@@ -6,6 +6,7 @@ from .gnn_price_model import RentalPriceGNN
 from .rfrkModel import RegressionKrigingModel
 from .sarModel import SpatialAutoregressiveModel
 from .spatialOutlierDetector import SpatialOutlierDetector
+from .gat_gcn_model import GraphAttentionGCN, GraphAttentionLayer
 
 __all__ = [
     "BaseModel",
@@ -16,4 +17,6 @@ __all__ = [
     "RegressionKrigingModel",
     "SpatialAutoregressiveModel",
     "SpatialOutlierDetector",
+    "GraphAttentionGCN",
+    "GraphAttentionLayer",
 ]
