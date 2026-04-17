@@ -9,4 +9,4 @@ IMAGE_NAME=${IMAGE_NAME:-predictor-pipelines}
 cd "$ROOT_DIR"
 
 echo "Construyendo imagen $IMAGE_NAME"
-exec docker build -f pipelines/docker/Dockerfile -t "$IMAGE_NAME" .
+exec docker build -f ml_core/docker/Dockerfile -t "$IMAGE_NAME" .

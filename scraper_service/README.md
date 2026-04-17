@@ -1,6 +1,7 @@
 # Scraper Service
 
 Este directorio es la fuente canónica del scraper.
+Los CSV crudos se guardan en `data/raw/` a nivel repositorio.
 
 ## Build
 

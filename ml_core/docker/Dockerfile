@@ -18,10 +18,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libspatialindex-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pipelines/requirements.txt /tmp/pipelines-requirements.txt
+COPY ml_core/requirements.txt /tmp/ml-core-requirements.txt
 
 RUN pip install --upgrade pip && \
-    pip install -r /tmp/pipelines-requirements.txt
+    pip install -r /tmp/ml-core-requirements.txt
 
 EXPOSE 8888
 

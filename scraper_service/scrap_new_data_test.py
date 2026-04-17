@@ -1,6 +1,7 @@
 import asyncio
 import os
 import traceback
+from pathlib import Path
 
 from routineJob.routineJob import RoutineJob
 from scrapper.ArgenPropScrapper import ArgenPropScrapper
@@ -42,10 +43,12 @@ async def run_job(url, csv_path, n_pages=5):
 async def main():
     await run_job(
         "https://www.argenprop.com/departamentos/venta/almagro-o-boedo-o-caballito?orden-masnuevos",
-        "scraper_service/storage/data/arg_venta_data.csv",
+        str(RAW_DATA_DIR / "arg_venta_data.csv"),
         5,
     )
 
 
 if __name__ == "__main__":
     asyncio.run(main())
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw"

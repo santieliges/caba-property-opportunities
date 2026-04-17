@@ -10,11 +10,11 @@ DATASET=${DATASET:-venta}
 cd "$ROOT_DIR"
 
 echo "Construyendo imagen $IMAGE_NAME"
-docker build -f pipelines/docker/Dockerfile -t "$IMAGE_NAME" .
+docker build -f ml_core/docker/Dockerfile -t "$IMAGE_NAME" .
 
 echo "Ejecutando preprocessing dentro del contenedor para dataset=$DATASET"
 exec docker run --rm \
   -v "$ROOT_DIR:/workspace" \
   -w /workspace \
   "$IMAGE_NAME" \
-  python -m pipelines.preprocessing.build_processed_data --dataset "$DATASET"
+  python -m ml_core.preprocessing.build_processed_data --dataset "$DATASET"

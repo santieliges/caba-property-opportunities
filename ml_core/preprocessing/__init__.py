@@ -1,10 +1,44 @@
-from .preprocessing import (
-    build_alquiler_processed_dataset,
-    build_venta_processed_dataset,
+# Pipelines
+
+from .pipelineBuilder import (
+    build_cleaning_pipeline,
 )
 
+
+# Splitting
+
+from .splitting import (
+    build_venta_splits,
+    build_alquiler_splits,
+)
+
+
+
+# Transformers (opcional re-export)
+
+from .transformers import (
+    NormalizeStringsTransformer,
+    FilterSmallBarriosTransformer,
+    AntiguedadImputer,
+    EstadoImputer,
+    DisposicionEncoder,
+)
+
+
 __all__ = [
-    "build_alquiler_processed_dataset",
-    "build_venta_processed_dataset",
+
+    # Pipelines
+    "build_cleaning_pipeline",
+
+    # Splits
+    "build_venta_splits",
+    "build_alquiler_splits",
+
+    # Transformers
+    "NormalizeStringsTransformer",
+    "FilterSmallBarriosTransformer",
+    "AntiguedadImputer",
+    "EstadoImputer",
+    "DisposicionEncoder",
+
 ]
-from .knhs import KNHS

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from pathlib import Path
 
 from routineJob.routineJob import RoutineJob
 from scrapper.ArgenPropScrapper import ArgenPropScrapper
@@ -9,6 +10,8 @@ from sync.sync import Synchronizer
 from updater.updater import Updater
 
 logger = logging.getLogger(__name__)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw"
 
 
 def env_flag(name: str, default: bool) -> bool:
@@ -64,7 +67,7 @@ async def run_argenprop_job(
 async def main():
     updater = Updater()
     await run_argenprop_job(
-        csv_path="storage/data/arg_venta_data.csv",
+        csv_path=str(RAW_DATA_DIR / "arg_venta_data.csv"),
         url_base="https://www.argenprop.com",
         updater=updater,
         delay_s=1,

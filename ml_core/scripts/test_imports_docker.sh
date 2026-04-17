@@ -9,19 +9,19 @@ IMAGE_NAME=${IMAGE_NAME:-predictor-pipelines}
 cd "$ROOT_DIR"
 
 echo "Construyendo imagen $IMAGE_NAME"
-docker build -f pipelines/docker/Dockerfile -t "$IMAGE_NAME" .
+docker build -f ml_core/docker/Dockerfile -t "$IMAGE_NAME" .
 
-echo "Probando imports de pipelines dentro del contenedor"
+echo "Probando imports de ml_core dentro del contenedor"
 exec docker run --rm \
   -v "$ROOT_DIR:/workspace" \
   -w /workspace \
   "$IMAGE_NAME" \
   python - <<'PY'
-from pipelines.preprocessing.preprocessing import (
+from ml_core.preprocessing.preprocessing import (
     build_alquiler_processed_dataset,
     build_venta_processed_dataset,
 )
-from pipelines.models import (
+from ml_core.models import (
     GWRModel,
     ModelEvaluator,
     RegressionKrigingModel,

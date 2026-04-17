@@ -1,5 +1,8 @@
 {
     "editor.unicodeHighlight.includeComments": true,
     "editor.unicodeHighlight.nonBasicASCII": true,
-    "terminal.integrated.enableImages": true
+    "terminal.integrated.enableImages": true,
+    "chat.tools.terminal.autoApprove": {
+        ".venv/bin/python": true
+    }
 }
