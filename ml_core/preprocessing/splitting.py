@@ -63,33 +63,60 @@ def _split_counts(n_rows: int, train_size: float, val_size: float) -> tuple[int,
     return n_train, n_val, n_test
 
 
-def build_dataset_splits(
+def split_dataframe(
+    df: pd.DataFrame,
     *,
-    config: SplitConfig,
-    verbose: bool = True,
+    train_size: float = 0.7,
+    val_size: float = 0.15,
+    test_size: float = 0.15,
+    random_state: int = 42,
 ) -> dict[str, pd.DataFrame]:
-    _validate_split_sizes(config.train_size, config.val_size, config.test_size)
+    _validate_split_sizes(train_size, val_size, test_size)
 
-    df = pd.read_csv(config.input_path)
     n_rows = len(df)
     n_train, n_val, n_test = _split_counts(
         n_rows=n_rows,
-        train_size=config.train_size,
-        val_size=config.val_size,
+        train_size=train_size,
+        val_size=val_size,
     )
 
-    rng = np.random.default_rng(config.random_state)
+    rng = np.random.default_rng(random_state)
     permutation = rng.permutation(n_rows)
 
     train_idx = permutation[:n_train]
     val_idx = permutation[n_train:n_train + n_val]
     test_idx = permutation[n_train + n_val:]
 
-    split_frames = {
+    return {
         "train": df.iloc[train_idx].copy(),
         "val": df.iloc[val_idx].copy(),
         "test": df.iloc[test_idx].copy(),
     }
+
+
+def build_dataset_splits(
+    *,
+    config: SplitConfig,
+    verbose: bool = True,
+) -> dict[str, pd.DataFrame]:
+    df = pd.read_csv(config.input_path)
+    split_frames = split_dataframe(
+        df,
+        train_size=config.train_size,
+        val_size=config.val_size,
+        test_size=config.test_size,
+        random_state=config.random_state,
+    )
+    n_rows = len(df)
+    n_train = len(split_frames["train"])
+    n_val = len(split_frames["val"])
+    n_test = len(split_frames["test"])
+
+    rng = np.random.default_rng(config.random_state)
+    permutation = rng.permutation(n_rows)
+    train_idx = permutation[:n_train]
+    val_idx = permutation[n_train:n_train + n_val]
+    test_idx = permutation[n_train + n_val:n_train + n_val + n_test]
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
 

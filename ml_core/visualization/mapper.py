@@ -12,7 +12,7 @@ def generar_grid_predicciones(
     model,
     gdf_val_clean,
     features,
-    barrios_path="../barrios.geojson",
+    barrios_path="../GeoData/barrios.geojson",
     grid_size=200
 ):
 

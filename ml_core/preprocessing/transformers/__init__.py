@@ -1,22 +1,27 @@
-from .dataTransformersForPipeline import (
+from .cleaningDataTransformers import (
     NormalizeStringsTransformer,
     FilterSmallBarriosTransformer,
     AntiguedadImputer,
     EstadoImputer,
-    DisposicionEncoder,
     RemoveOutliersTransformer,
     SpatialJoinBarriosTransformer,
     BanosImputer,
     DisposicionImputer,
     ExpensasImputer,
-    EstadoOrdinalEncoder,
     FillZeroImputer,
     AntiguedadCleaner,
-    FeatureScaler,
-    NumericClipper
+    NumericClipper,
 )
 
-from .featureEngeneeringTransfromers import LogPrecioTransformer
+from .featureEngeneeringTransfromers import (
+    LogPrecioTransformer,
+    DisposicionEncoder,
+    EstadoOrdinalEncoder,
+    FeatureScaler,
+    DistanceToPOITransformer,
+    DistanceToPolygonTransformer,
+    CountNearbyPOITransformer
+    )
 
 __all__ = [
     "NormalizeStringsTransformer",
@@ -35,4 +40,7 @@ __all__ = [
     "AntiguedadCleaner",
     "FeatureScaler",
     "NumericClipper",
-]
+    "DistanceToPOITransformer",
+    "DistanceToPolygonTransformer",
+    "CountNearbyPOITransformer"
+    ]

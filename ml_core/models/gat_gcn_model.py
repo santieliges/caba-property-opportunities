@@ -1,9 +1,11 @@
 import math
+from itertools import product
 from typing import Iterable, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
 import torch.nn as nn
+from sklearn.metrics import mean_absolute_error, mean_squared_error, median_absolute_error, r2_score
 
 from .baseModel import BaseModel
 
@@ -135,6 +137,9 @@ class GraphAttentionGCN(BaseModel, nn.Module):
         device: Optional[str] = None,
         patience: int = 100,
         min_delta: float = 1e-4,
+        loss_name: str = "mse",
+        huber_delta: float = 1.0,
+        grad_clip_norm: Optional[float] = None,
     ):
         BaseModel.__init__(self)
         nn.Module.__init__(self)
@@ -143,32 +148,111 @@ class GraphAttentionGCN(BaseModel, nn.Module):
         self.edge_dim = edge_dim
         self.hidden = hidden
         self.num_layers = num_layers
+        self.num_heads = num_heads
         self.dropout = dropout
         self.lr = lr
         self.weight_decay = weight_decay
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.patience = patience
         self.min_delta = min_delta
+        self.loss_name = loss_name
+        self.huber_delta = huber_delta
+        self.grad_clip_norm = grad_clip_norm
 
-        layers = []
-        in_dim = len(self.feature_names_)
-        for _ in range(num_layers):
-            layers.append(GraphAttentionLayer(in_dim, edge_dim, hidden, num_heads=num_heads, dropout=dropout))
-            in_dim = hidden
-        self.layers = nn.ModuleList(layers)
-
-        self.readout = nn.Sequential(
-            nn.Linear(hidden, hidden),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden, 1),
-        )
-
-        self.to(self.device)
+        self._build_network()
 
         # cache used during predict
         self.edge_index_ = None
         self.edge_attr_ = None
+        self.tuning_results_ = None
+
+    @staticmethod
+    def _smape(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        return float(
+            100
+            * np.mean(
+                2 * np.abs(y_pred - y_true)
+                / (np.abs(y_true) + np.abs(y_pred) + 1e-8)
+            )
+        )
+
+    @staticmethod
+    def _metrics_dict(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
+        y_true_arr = np.asarray(y_true).reshape(-1)
+        y_pred_arr = np.asarray(y_pred).reshape(-1)
+        mape = float(
+            100
+            * np.mean(
+                np.abs((y_true_arr - y_pred_arr) / np.clip(np.abs(y_true_arr), 1e-8, None))
+            )
+        )
+        return {
+            "rmse": float(np.sqrt(mean_squared_error(y_true_arr, y_pred_arr))),
+            "mae": float(mean_absolute_error(y_true_arr, y_pred_arr)),
+            "mape": mape,
+            "median_ae": float(median_absolute_error(y_true_arr, y_pred_arr)),
+            "r2": float(r2_score(y_true_arr, y_pred_arr)),
+            "smape": GraphAttentionGCN._smape(y_true_arr, y_pred_arr),
+        }
+
+    def _build_network(self) -> None:
+        layers = []
+        in_dim = len(self.feature_names_)
+        for _ in range(self.num_layers):
+            layers.append(
+                GraphAttentionLayer(
+                    in_dim,
+                    self.edge_dim,
+                    self.hidden,
+                    num_heads=self.num_heads,
+                    dropout=self.dropout,
+                )
+            )
+            in_dim = self.hidden
+        self.layers = nn.ModuleList(layers)
+
+        self.readout = nn.Sequential(
+            nn.Linear(self.hidden, self.hidden),
+            nn.ReLU(),
+            nn.Dropout(self.dropout),
+            nn.Linear(self.hidden, 1),
+        )
+
+        self.to(self.device)
+
+    def _apply_config(self, config: dict) -> None:
+        self.hidden = int(config.get("hidden", self.hidden))
+        self.num_layers = int(config.get("num_layers", self.num_layers))
+        self.num_heads = int(config.get("num_heads", self.num_heads))
+        self.dropout = float(config.get("dropout", self.dropout))
+        self.lr = float(config.get("lr", self.lr))
+        self.weight_decay = float(config.get("weight_decay", self.weight_decay))
+        self.loss_name = str(config.get("loss_name", self.loss_name))
+        self.huber_delta = float(config.get("huber_delta", self.huber_delta))
+        grad_clip_norm = config.get("grad_clip_norm", self.grad_clip_norm)
+        self.grad_clip_norm = None if grad_clip_norm is None else float(grad_clip_norm)
+        self._build_network()
+
+    @staticmethod
+    def _set_random_state(random_state: Optional[int]) -> None:
+        if random_state is None:
+            return
+        np.random.seed(random_state)
+        torch.manual_seed(random_state)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(random_state)
+
+    def _build_loss_fn(self) -> nn.Module:
+        if self.loss_name == "mse":
+            return nn.MSELoss()
+        if self.loss_name == "huber":
+            return nn.HuberLoss(delta=self.huber_delta)
+        if self.loss_name == "smooth_l1":
+            return nn.SmoothL1Loss(beta=self.huber_delta)
+        raise ValueError(
+            "loss_name debe ser 'mse', 'huber' o 'smooth_l1'. "
+            f"Recibido: {self.loss_name!r}"
+        )
 
     # --- data helpers ---------------------------------------------------
     def _prepare_tensors(
@@ -215,6 +299,7 @@ class GraphAttentionGCN(BaseModel, nn.Module):
         edge_attr: np.ndarray,
         epochs: int = 200,
     ):
+        self.train()
         x_tensor, y_tensor, edge_index_tensor, edge_attr_tensor = self._prepare_tensors(
             X, y=y, edge_index=edge_index, edge_attr=edge_attr
         )
@@ -223,7 +308,7 @@ class GraphAttentionGCN(BaseModel, nn.Module):
         self.edge_attr_ = edge_attr
 
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-        loss_fn = nn.MSELoss()
+        loss_fn = self._build_loss_fn()
 
         best_loss = float("inf")
         patience_left = self.patience
@@ -233,6 +318,8 @@ class GraphAttentionGCN(BaseModel, nn.Module):
             preds = self.forward(x_tensor, edge_index_tensor, edge_attr_tensor)
             loss = loss_fn(preds.view(-1, 1), y_tensor)
             loss.backward()
+            if self.grad_clip_norm is not None:
+                torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=self.grad_clip_norm)
             optimizer.step()
 
             current_loss = loss.item()
@@ -249,6 +336,192 @@ class GraphAttentionGCN(BaseModel, nn.Module):
         self.is_fitted_ = True
         self.X_train_ = X
         self.y_train_ = np.asarray(y)
+        return self
+
+    def tune_hyperparameters(
+        self,
+        X,
+        y,
+        coords=None,
+        *,
+        edge_index: np.ndarray,
+        edge_attr: np.ndarray,
+        X_val=None,
+        y_val=None,
+        val_edge_index: Optional[np.ndarray] = None,
+        val_edge_attr: Optional[np.ndarray] = None,
+        param_grid: Optional[dict] = None,
+        search_type: str = "grid",
+        n_iter: Optional[int] = None,
+        epochs: int = 600,
+        refit: bool = True,
+        refit_epochs: Optional[int] = None,
+        optimize_metric: str = "mae",
+        maximize_metric: bool = False,
+        sort_by: Tuple[str, ...] = ("mae", "rmse"),
+        eval_on_exp_scale: bool = True,
+        random_state: Optional[int] = 42,
+        verbose: bool = True,
+    ):
+        if param_grid is None:
+            param_grid = {
+                "hidden": [64, 96, 128],
+                "num_heads": [2, 4],
+                "dropout": [0.05, 0.10],
+                "lr": [1e-3, 5e-4],
+            }
+
+        if X_val is None:
+            X_val = X
+        if y_val is None:
+            y_val = y
+        if val_edge_index is None:
+            val_edge_index = edge_index
+        if val_edge_attr is None:
+            val_edge_attr = edge_attr
+
+        grid_keys = list(param_grid.keys())
+        grid_values = [param_grid[key] for key in grid_keys]
+        valid_metric_names = {"rmse", "mae", "mape", "median_ae", "r2", "smape"}
+        valid_search_types = {"grid", "random"}
+
+        if optimize_metric not in valid_metric_names:
+            raise ValueError(
+                f"optimize_metric debe ser una de {sorted(valid_metric_names)}. "
+                f"Recibido: {optimize_metric!r}"
+            )
+        if search_type not in valid_search_types:
+            raise ValueError(
+                f"search_type debe ser uno de {sorted(valid_search_types)}. "
+                f"Recibido: {search_type!r}"
+            )
+
+        results = []
+        best_result = None
+        best_config = None
+
+        all_configs = [dict(zip(grid_keys, values)) for values in product(*grid_values)]
+        if search_type == "random":
+            if n_iter is None:
+                raise ValueError("Si search_type='random', tenés que pasar n_iter.")
+            if n_iter <= 0:
+                raise ValueError(f"n_iter debe ser mayor a 0. Recibido: {n_iter}")
+
+            rng = np.random.default_rng(random_state)
+            sample_size = min(int(n_iter), len(all_configs))
+            sampled_idx = rng.choice(len(all_configs), size=sample_size, replace=False)
+            configs_to_run = [all_configs[int(i)] for i in sampled_idx]
+        else:
+            configs_to_run = all_configs
+
+        if verbose:
+            print(
+                f"Ejecutando {len(configs_to_run)} configuraciones "
+                f"(search_type={search_type}, total_grid={len(all_configs)})."
+            )
+
+        for cfg in configs_to_run:
+            hidden = int(cfg.get("hidden", self.hidden))
+            num_heads = int(cfg.get("num_heads", self.num_heads))
+            if hidden % num_heads != 0:
+                if verbose:
+                    print(f"Saltando config inválida {cfg}: hidden debe ser divisible por num_heads.")
+                continue
+
+            run_seed = random_state if random_state is None else int(random_state)
+            self._set_random_state(run_seed)
+
+            candidate_cfg = {
+                "hidden": hidden,
+                "num_layers": int(cfg.get("num_layers", self.num_layers)),
+                "num_heads": num_heads,
+                "dropout": float(cfg.get("dropout", self.dropout)),
+                "lr": float(cfg.get("lr", self.lr)),
+                "weight_decay": float(cfg.get("weight_decay", self.weight_decay)),
+                "loss_name": str(cfg.get("loss_name", self.loss_name)),
+                "huber_delta": float(cfg.get("huber_delta", self.huber_delta)),
+                "grad_clip_norm": cfg.get("grad_clip_norm", self.grad_clip_norm),
+            }
+
+            if verbose:
+                print(f"Entrenando config {candidate_cfg}")
+
+            candidate = GraphAttentionGCN(
+                feature_names=self.feature_names_,
+                edge_dim=self.edge_dim,
+                hidden=candidate_cfg["hidden"],
+                num_layers=candidate_cfg["num_layers"],
+                num_heads=candidate_cfg["num_heads"],
+                dropout=candidate_cfg["dropout"],
+                lr=candidate_cfg["lr"],
+                weight_decay=candidate_cfg["weight_decay"],
+                device=str(self.device),
+                patience=self.patience,
+                min_delta=self.min_delta,
+                loss_name=candidate_cfg["loss_name"],
+                huber_delta=candidate_cfg["huber_delta"],
+                grad_clip_norm=candidate_cfg["grad_clip_norm"],
+            )
+
+            candidate.fit(
+                X,
+                y,
+                edge_index=edge_index,
+                edge_attr=edge_attr,
+                epochs=epochs,
+            )
+
+            preds = candidate.predict(
+                X_val,
+                edge_index=val_edge_index,
+                edge_attr=val_edge_attr,
+            )
+
+            y_true_eval = np.asarray(y_val).reshape(-1)
+            y_pred_eval = np.asarray(preds).reshape(-1)
+            if eval_on_exp_scale:
+                y_true_eval = np.exp(y_true_eval)
+                y_pred_eval = np.exp(y_pred_eval)
+
+            metrics = self._metrics_dict(y_true_eval, y_pred_eval)
+            result = {**candidate_cfg, **metrics}
+            results.append(result)
+
+            if best_result is None:
+                best_result = result
+                best_config = candidate_cfg.copy()
+                continue
+
+            current_metric = result[optimize_metric]
+            best_metric = best_result[optimize_metric]
+            is_better = current_metric > best_metric if maximize_metric else current_metric < best_metric
+
+            if not is_better and current_metric == best_metric:
+                current_key = tuple(result[key] for key in sort_by)
+                best_key = tuple(best_result[key] for key in sort_by)
+                is_better = current_key < best_key
+
+            if is_better:
+                best_result = result
+                best_config = candidate_cfg.copy()
+
+        if not results:
+            raise ValueError("No se encontraron configuraciones válidas durante el tuning.")
+
+        self.tuning_results_ = sorted(results, key=lambda row: tuple(row[key] for key in sort_by))
+        self.best_params_ = best_config.copy()
+
+        if refit:
+            self._apply_config(best_config)
+            self._set_random_state(random_state)
+            self.fit(
+                X,
+                y,
+                edge_index=edge_index,
+                edge_attr=edge_attr,
+                epochs=refit_epochs or epochs,
+            )
+
         return self
 
     def predict(
