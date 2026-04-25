@@ -16,4 +16,4 @@ EXPOSE 5678
 # Comando por defecto para depuración (cambiar el script según necesidad)
 #CMD ["python", "-m", "debugpy", "--listen", "0.0.0.0:5678", "--wait-for-client", "scraper_service/scrap_new_data.py"]
 CMD ["python", "-m", "debugpy", "--listen", "0.0.0.0:5678", "--wait-for-client"]
-
+RUN pip install --no-cache-dir pytest==7.3.2

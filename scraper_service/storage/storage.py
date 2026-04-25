@@ -65,6 +65,7 @@ DTYPES = {
     "ambientes": "Int64",
     "banos": "Int64",
     "cocheras": "Int64",
+    "pozo": "Int64",
     "latitud": "Float64",
     "longitud": "Float64",
 }
@@ -85,7 +86,7 @@ class CSVStorage(Storage):
     def _normalize_entry(self, entry: dict) -> dict:
         out = {}
         for key, value in entry.items():
-            if key in ["precio", "expensas", "ambientes", "banos", "cocheras"]:
+            if key in ["precio", "expensas", "ambientes", "banos", "cocheras", "pozo"]:
                 out[key] = None if value is None else int(value)
             elif key in ["area_m2_total", "latitud", "longitud"]:
                 out[key] = None if value is None else float(value)

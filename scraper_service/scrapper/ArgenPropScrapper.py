@@ -12,6 +12,7 @@ from scrapper.Scrapper import BaseScrapper
 from scrapper.SosivaApiClient import (
     SosivaApiClient,
     map_aviso_to_inmueble_fields,
+    detect_pozo,
 )
 
 
@@ -37,6 +38,8 @@ class InmuebleData:
     cocheras: Optional[int] = None
     latitud: Optional[float] = None
     longitud: Optional[float] = None
+    informacion_adicional: Optional[str] = None
+    pozo: Optional[int] = None
     image_url: Optional[str] = None
     imagen_path: Optional[str] = None
 
@@ -47,6 +50,7 @@ class InmuebleData:
         self.dormitorios = self._to_int(self.dormitorios)
         self.banos = self._to_int(self.banos)
         self.cocheras = self._to_int(self.cocheras)
+        self.pozo = self._to_int(self.pozo)
         self.area_m2_cubierta = self._to_float(self.area_m2_cubierta)
         self.area_m2_descubierta = self._to_float(self.area_m2_descubierta)
         self.area_m2_total = self._to_float(self.area_m2_total)
@@ -167,8 +171,9 @@ class ArgenPropScrapper(BaseScrapper):
         edificio = await self.extract_features_from_section("section-caracteristicas-del-edificio")
         datos_basicos = await self.extract_features_from_section("section-datos-basicos")
         lat, lon = await self.extract_lat_lon()
+        informacion_adicional = await self.extract_informacion_adicional()
 
-        return {
+        detail = {
             "precio": precio,
             "moneda": moneda,
             "expensas": expensas,
@@ -187,14 +192,41 @@ class ArgenPropScrapper(BaseScrapper):
             "tipo_unidad": datos_basicos.get("tipo de unidad"),
             "latitud": lat,
             "longitud": lon,
+            "informacion_adicional": informacion_adicional,
         }
 
-        antiguedad_val = result["antiguedad"]
-        print(f"Page antiguedad for {url}: {antiguedad_val} (from features: {features.get('antiguedad')}, edificio: {edificio.get('antiguedad')})")
-        return result
+        if informacion_adicional:
+            detail["pozo"] = detect_pozo({"InformacionAdicional_t": informacion_adicional})
 
-    async def extract_all_pages(self, n_pages=5, delay_s: float = 0.0, jitter_s: float = 0.0):
+        return detail
+
+    async def extract_informacion_adicional(self):
+        # Selector para la descripción en ArgenProp (ajustar si es necesario)
+        selectors = [
+            ".card__description",
+            ".description",
+            "[data-testid='description']",
+            "p.description",
+            ".property-description",
+        ]
+        for selector in selectors:
+            element = await self.detail_page.query_selector(selector)
+            if element:
+                text = await element.inner_text()
+                return text.strip()
+        return None
+
+    async def extract_all_pages(
+        self,
+        n_pages=5,
+        delay_s: float = 0.0,
+        jitter_s: float = 0.0,
+        existing_ids: set | None = None,
+        max_existing_hits: int | None = None,
+    ):
         inmuebles = []
+        existing_ids = existing_ids or set()
+        existing_hits = 0
 
         for page_num in range(1, n_pages + 1):
             print(f"Scraping página {page_num}")
@@ -210,6 +242,10 @@ class ArgenPropScrapper(BaseScrapper):
             if response is not None and response.status == 429:
                 await asyncio.sleep(10.0)
                 await self.page.goto(list_url, wait_until="domcontentloaded")
+
+            if response is not None and response.status == 404:
+                print("Página no encontrada, terminando.")
+                break
 
             try:
                 await self.page.wait_for_selector(".listing__item", timeout=30000)
@@ -242,7 +278,19 @@ class ArgenPropScrapper(BaseScrapper):
             listings = await self.extract_listings_from_page()
             print(f" -> {len(listings)} listings encontrados")
 
+            if not listings:
+                print("No hay listings en esta página; terminando.")
+                break
+
             for base in listings:
+                if base.get("id") is not None and base["id"] in existing_ids:
+                    existing_hits += 1
+                    print(f"Encontrado listing existente {base['id']} ({existing_hits}/{max_existing_hits or '∞'})")
+                    if max_existing_hits and existing_hits >= max_existing_hits:
+                        print("Se alcanzó el límite de departamentos ya existentes, deteniendo el scraping.")
+                        break
+                    continue
+
                 try:
                     detail = None
                     if self.use_api_details and base.get("id") is not None:
@@ -256,6 +304,11 @@ class ArgenPropScrapper(BaseScrapper):
                     if detail is None:
                         detail = await self.extract_detail_data(base["url"])
                         print(f"Using page for {base['id']}, antiguedad: {detail.get('antiguedad')}")
+
+                    # Si detail vino de página y no tiene pozo, calcularlo
+                    if 'pozo' not in detail and detail.get('informacion_adicional'):
+                        aviso_simulado = {"InformacionAdicional_t": detail['informacion_adicional']}
+                        detail['pozo'] = detect_pozo(aviso_simulado)
 
                     inmuebles.append(
                         InmuebleData(
@@ -271,6 +324,9 @@ class ArgenPropScrapper(BaseScrapper):
 
                 if delay_s or jitter_s:
                     await asyncio.sleep(delay_s + (random.random() * jitter_s))
+
+            if max_existing_hits and existing_hits >= max_existing_hits:
+                break
 
         return inmuebles
 

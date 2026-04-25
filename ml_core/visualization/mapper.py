@@ -1,5 +1,6 @@
 
 import json
+import warnings
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -13,7 +14,9 @@ def generar_grid_predicciones(
     gdf_val_clean,
     features,
     barrios_path="../GeoData/barrios.geojson",
-    grid_size=200
+    grid_size=200,
+    prediction_scale="log_precio",
+    coord_feature_names=("longitud", "latitud"),
 ):
 
     barrios = gpd.read_file(barrios_path)
@@ -69,23 +72,85 @@ def generar_grid_predicciones(
         [std_depto] * len(coords_grid)
     )
 
+    if coord_feature_names is not None:
+        if len(coord_feature_names) != 2:
+            raise ValueError(
+                "coord_feature_names debe tener exactamente dos nombres de columna."
+            )
+        lon_col, lat_col = coord_feature_names
+        if lon_col in X_std_grid.columns:
+            X_std_grid[lon_col] = coords_grid[:, 0]
+        if lat_col in X_std_grid.columns:
+            X_std_grid[lat_col] = coords_grid[:, 1]
+
     # 🆕 asegurar columnas correctas
     X_std_grid = X_std_grid[features]
 
-    y_pred = model.predict(
+    coords_are_features = False
+    if coord_feature_names is not None:
+        coords_are_features = all(col in X_std_grid.columns for col in coord_feature_names)
+    model_injects_coords = hasattr(model, "coord_feature_names")
+
+    if (
+        getattr(model, "use_kriging", None) is False
+        and not coords_are_features
+        and not model_injects_coords
+    ):
+        warnings.warn(
+            "El modelo fue configurado con use_kriging=False. "
+            "Como latitud/longitud no están presentes en `features` ni el modelo "
+            "las inyecta internamente, el mapper usa el mismo vector de features "
+            "en toda la grilla y las coordenadas no afectan la predicción, por lo "
+            "que el mapa tenderá a salir uniforme.",
+            RuntimeWarning,
+        )
+
+    y_pred = np.asarray(model.predict(
         X_std_grid,
         coords_grid
-    )
+    )).reshape(-1)
 
-    # revertir log
-    precio = np.exp(y_pred)
+    if prediction_scale == "log_precio":
+        precio = np.exp(y_pred)
+    elif prediction_scale == "precio":
+        precio = y_pred
+    else:
+        raise ValueError(
+            "prediction_scale debe ser 'log_precio' o 'precio'. "
+            f"Recibido: {prediction_scale!r}."
+        )
 
     # usar área real del depto estándar
     area_real = std_depto["area_m2_total"]
+    if not np.isfinite(area_real) or area_real <= 0:
+        raise ValueError(
+            "area_m2_total del departamento estándar debe ser positiva para calcular precio_m2. "
+            f"Recibido: {area_real!r}."
+        )
 
-    df_grid["precio_m2"] = (
-        precio / area_real
-    )
+    precio_m2 = precio / area_real
+    if not np.all(np.isfinite(precio_m2)):
+        raise ValueError(
+            "La grilla contiene valores no finitos en precio_m2. "
+            "Revisá la escala de salida del modelo y el área usada en el mapa."
+        )
+    if np.any(precio_m2 < 0):
+        raise ValueError(
+            "La grilla contiene valores negativos en precio_m2. "
+            "Esto no debería ocurrir para precios; revisá si el modelo devuelve "
+            "residuos, otra transformación distinta de log-precio, o una escala "
+            "incompatible con `prediction_scale`."
+        )
+    if np.allclose(precio_m2, precio_m2[0]):
+        warnings.warn(
+            "El mapa resultó prácticamente constante. "
+            "Esto suele pasar cuando la grilla usa features fijas en todos los puntos "
+            "y el modelo no incorpora coordenadas en predict(), o cuando "
+            "latitud/longitud no están incluidas como features.",
+            RuntimeWarning,
+        )
+
+    df_grid["precio_m2"] = precio_m2
 
     return df_grid, barrios, std_depto
 

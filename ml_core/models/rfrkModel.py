@@ -1,21 +1,37 @@
 from .baseModel import BaseModel
 from pykrige.rk import RegressionKriging
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.inspection import permutation_importance
 from sklearn.model_selection import GridSearchCV, KFold
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import (
+    mean_absolute_error,
+    mean_squared_error,
+    r2_score,
+)
 import numpy as np
+import pandas as pd
 import warnings
 from scipy.linalg import LinAlgError
 
 class RegressionKrigingModel(BaseModel):
-    def __init__(self, rf_params=None, kriging_params=None):
+    def __init__(
+        self,
+        rf_params=None,
+        kriging_params=None,
+        use_kriging=True,
+        coord_feature_names=("longitud", "latitud"),
+    ):
         super().__init__()
         self.rf_params = rf_params or {}
         self.kriging_params = kriging_params or {}
+        self.use_kriging = use_kriging
+        self.coord_feature_names = tuple(coord_feature_names)
 
         self.rf_ = None
+        self.model_ = None
         self.best_params_ = None
         self.is_fitted_ = False
+        self.rf_feature_names_ = None
 
     def _build_rf(self):
         return RandomForestRegressor(
@@ -28,6 +44,27 @@ class RegressionKrigingModel(BaseModel):
             random_state=42,
             n_jobs=-1,
         )
+
+    def _validate_coords(self, coords, n_rows):
+        coords_arr = np.asarray(coords)
+        if coords_arr.ndim != 2 or coords_arr.shape[1] != 2:
+            raise ValueError(
+                f"`coords` debe ser (n, 2). Recibido {coords_arr.shape}."
+            )
+        if len(coords_arr) != n_rows:
+            raise ValueError(
+                f"X y coords deben tener la misma cantidad de filas. "
+                f"Recibido: len(X)={n_rows}, len(coords)={len(coords_arr)}."
+            )
+        return coords_arr
+
+    def _augment_features_with_coords(self, X, coords):
+        X_df = X.copy()
+        coords_arr = self._validate_coords(coords, len(X_df))
+        lon_col, lat_col = self.coord_feature_names
+        X_df[lon_col] = coords_arr[:, 0]
+        X_df[lat_col] = coords_arr[:, 1]
+        return X_df, coords_arr
 
     def fit(
         self,
@@ -53,13 +90,24 @@ class RegressionKrigingModel(BaseModel):
         ext_drift_grid=None,
         functional_drift=None,
     ):
-        self.feature_names_ = X.columns
+        self.feature_names_ = list(X.columns)
 
         self.X_train_ = X.copy()
-        self.coords_train_ = np.asarray(coords).copy()
+        self.coords_train_ = self._validate_coords(coords, len(X)).copy()
         self.y_train_ = np.asarray(y).ravel()
+        self.X_train_rf_, _ = self._augment_features_with_coords(
+            self.X_train_,
+            self.coords_train_,
+        )
+        self.rf_feature_names_ = list(self.X_train_rf_.columns)
 
         self.rf_ = self._build_rf()
+        self.model_ = None
+
+        if not self.use_kriging:
+            self.rf_.fit(self.X_train_rf_, self.y_train_)
+            self.is_fitted_ = True
+            return self
 
         rk_kwargs = dict(self.kriging_params)
         rk_kwargs.pop("regression_model", None)
@@ -118,36 +166,38 @@ class RegressionKrigingModel(BaseModel):
             **rk_kwargs,
         )
 
-        self.model_.fit(self.X_train_, self.coords_train_, self.y_train_)
+        self.model_.fit(self.X_train_rf_, self.coords_train_, self.y_train_)
         self.is_fitted_ = True
         return self
 
 
     def predict(self, X, coords):
-        X = X[self.feature_names_]
         if not self.is_fitted_:
             raise RuntimeError("El modelo no está entrenado")
+        X = X[self.feature_names_]
+        X_rf, coords_arr = self._augment_features_with_coords(X, coords)
 
-        coords = np.asarray(coords)
+        if not self.use_kriging:
+            return np.asarray(self.rf_.predict(X_rf)).reshape(-1)
 
         try:
-            return self.model_.predict(X, coords).reshape(-1, 1)
+            return np.asarray(self.model_.predict(X_rf, coords_arr)).reshape(-1)
         except LinAlgError as exc:
             warnings.warn(
                 "PyKrige encontro una matriz singular en predict(); se usa fallback robusto punto a punto.",
                 RuntimeWarning,
             )
 
-            preds = np.empty((len(X), 1), dtype=float)
+            preds = np.empty(len(X), dtype=float)
             fallback_count = 0
 
             for i in range(len(X)):
-                X_i = X.iloc[[i]]
-                coords_i = coords[i:i+1]
+                X_i = X_rf.iloc[[i]]
+                coords_i = coords_arr[i:i+1]
                 try:
-                    preds[i, 0] = float(np.asarray(self.model_.predict(X_i, coords_i)).reshape(-1)[0])
+                    preds[i] = float(np.asarray(self.model_.predict(X_i, coords_i)).reshape(-1)[0])
                 except LinAlgError:
-                    preds[i, 0] = float(np.asarray(self.rf_.predict(X_i)).reshape(-1)[0])
+                    preds[i] = float(np.asarray(self.rf_.predict(X_i)).reshape(-1)[0])
                     fallback_count += 1
 
             if fallback_count > 0:
@@ -162,10 +212,13 @@ class RegressionKrigingModel(BaseModel):
         if not self.is_fitted_:
             raise RuntimeError("El modelo no está entrenado")
 
-        return self.model_.predict(
-            self.X_train_,
+        if not self.use_kriging:
+            return np.asarray(self.rf_.predict(self.X_train_rf_)).reshape(-1)
+
+        return np.asarray(self.model_.predict(
+            self.X_train_rf_,
             self.coords_train_
-        ).reshape(-1, 1)
+        )).reshape(-1)
 
 
     def tune_hyperparameters(
@@ -179,13 +232,17 @@ class RegressionKrigingModel(BaseModel):
     ):
         if rf_param_grid is None:
             rf_param_grid = {
-                "n_estimators": [100, 200],
-                "max_depth": [None, 15],
-                "min_samples_leaf": [1, 3],
-                "max_features": ["sqrt", "log2"],
+                "n_estimators": [200, 500],
+                "max_depth": [10, 20, None],
+                "min_samples_split": [2, 5, 10],
+                "min_samples_leaf": [1, 3, 5],
+                "max_features": ["sqrt", "log2", 0.5],
+                "bootstrap": [True],
             }
 
         kf = KFold(n_splits=cv, shuffle=True, random_state=42)
+        X_rf, coords_arr = self._augment_features_with_coords(X, coords)
+        rf_feature_names = list(X_rf.columns)
 
         grid = GridSearchCV(
             RandomForestRegressor(random_state=42, n_jobs=-1),
@@ -194,10 +251,14 @@ class RegressionKrigingModel(BaseModel):
             cv=kf,
             n_jobs=-1
         )
-        grid.fit(X, y)
+        grid.fit(X_rf, y)
 
         self.best_params_ = grid.best_params_
         self.rf_params.update(self.best_params_)
+
+        if not self.use_kriging:
+            self.fit(X, y, coords)
+            return self
 
         # Barrido simple sobre kriging
         best_rmse = np.inf
@@ -208,8 +269,8 @@ class RegressionKrigingModel(BaseModel):
                 regression_model=self._build_rf(),
                 n_closest_points=k
             )
-            model.fit(X, coords, y)
-            preds = model.predict(X, coords)
+            model.fit(X_rf, coords_arr, y)
+            preds = model.predict(X_rf, coords_arr)
             rmse = np.sqrt(mean_squared_error(y.flatten(), preds))
 
             if rmse < best_rmse:
@@ -222,7 +283,149 @@ class RegressionKrigingModel(BaseModel):
         self.fit(X, y, coords)
         return self
 
-    def feature_importances_(self):
+    def feature_importances_(
+        self,
+        X=None,
+        y=None,
+        coords=None,
+        method="permutation",
+        n_repeats=10,
+        scoring="neg_root_mean_squared_error",
+        random_state=42,
+        n_jobs=-1,
+        as_frame=False,
+    ):
         if not self.is_fitted_:
             raise RuntimeError("El modelo no está entrenado")
-        return self.rf_.feature_importances_
+
+        method = method.lower()
+
+        if method in {"rf", "impurity", "mdi"}:
+            importances = np.asarray(
+                self.rf_.feature_importances_
+            )
+            if as_frame:
+                return pd.DataFrame(
+                    {
+                        "feature": list(self.rf_feature_names_),
+                        "importance": importances,
+                    }
+                ).sort_values(
+                    "importance",
+                    ascending=False,
+                ).reset_index(drop=True)
+            return importances
+
+        if method != "permutation":
+            raise ValueError(
+                "method debe ser 'permutation' "
+                "o uno de {'rf', 'impurity', 'mdi'}."
+            )
+
+        if X is None:
+            X = self.X_train_
+        if y is None:
+            y = self.y_train_
+        if coords is None:
+            coords = self.coords_train_
+
+        X_eval = X.copy()
+        y_eval = np.asarray(y).ravel()
+        coords_eval = self._validate_coords(coords, len(X_eval))
+
+        if len(X_eval) != len(y_eval):
+            raise ValueError(
+                "X e y deben tener la misma cantidad de filas."
+            )
+
+        if len(X_eval) != len(coords_eval):
+            raise ValueError(
+                "X y coords deben tener la misma cantidad de filas."
+            )
+
+        def _permutation_scorer(estimator, X_perm, y_true):
+            y_pred = np.asarray(
+                estimator.predict(X_perm, coords_eval)
+            ).reshape(-1)
+            return self._score_predictions(
+                y_true=y_true,
+                y_pred=y_pred,
+                scoring=scoring,
+            )
+
+        result = permutation_importance(
+            estimator=self,
+            X=X_eval,
+            y=y_eval,
+            scoring=_permutation_scorer,
+            n_repeats=n_repeats,
+            random_state=random_state,
+            n_jobs=n_jobs,
+        )
+
+        if as_frame:
+            return pd.DataFrame(
+                {
+                    "feature": list(X_eval.columns),
+                    "importance_mean": result.importances_mean,
+                    "importance_std": result.importances_std,
+                }
+            ).sort_values(
+                "importance_mean",
+                ascending=False,
+            ).reset_index(drop=True)
+
+        return result.importances_mean
+
+    def _score_predictions(
+        self,
+        y_true,
+        y_pred,
+        scoring,
+    ):
+
+        if callable(scoring):
+            return float(scoring(y_true, y_pred))
+
+        if scoring in {None, "neg_root_mean_squared_error"}:
+            return -float(
+                np.sqrt(mean_squared_error(y_true, y_pred))
+            )
+
+        if scoring == "rmse":
+            return float(
+                np.sqrt(mean_squared_error(y_true, y_pred))
+            )
+
+        if scoring == "neg_mean_squared_error":
+            return -float(
+                mean_squared_error(y_true, y_pred)
+            )
+
+        if scoring == "mse":
+            return float(
+                mean_squared_error(y_true, y_pred)
+            )
+
+        if scoring in {"neg_mean_absolute_error", "neg_mae"}:
+            return -float(
+                mean_absolute_error(y_true, y_pred)
+            )
+
+        if scoring in {"mean_absolute_error", "mae"}:
+            return float(
+                mean_absolute_error(y_true, y_pred)
+            )
+
+        if scoring == "r2":
+            return float(
+                r2_score(y_true, y_pred)
+            )
+
+        raise ValueError(
+            "scoring no soportado. Usa uno de: "
+            "'neg_root_mean_squared_error', 'rmse', "
+            "'neg_mean_squared_error', 'mse', "
+            "'neg_mean_absolute_error', 'mae', 'r2', "
+            "o un callable(y_true, y_pred)."
+        )

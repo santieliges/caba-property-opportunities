@@ -1,3 +1,5 @@
 __pycache__/
 *.pyc
 runtime/
+playwright_user_data_ArgenPropScrapper
+playwright_user_data_ArgenPropScrapper/**

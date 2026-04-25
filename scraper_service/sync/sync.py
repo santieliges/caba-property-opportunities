@@ -9,7 +9,7 @@ class Synchronizer:
     def __init__(
         self,
         storage: Storage,
-        BUSINESS_FIELDS={"precio", "moneda", "ambientes", "expensas", "latitud", "longitud", "antiguedad"},
+        BUSINESS_FIELDS={"precio", "moneda", "ambientes", "expensas", "latitud", "longitud", "antiguedad", "pozo", "area_m2_total"},
     ):
         self.storage = storage
         self.BUSINESS_FIELDS = BUSINESS_FIELDS

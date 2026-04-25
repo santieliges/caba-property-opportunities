@@ -12,7 +12,7 @@ docker build -f scraper_service/Dockerfile -t scraper-service .
 ## Run
 
 ```bash
-docker run --rm -it scraper-service
+docker run -it scraper-service bash
 ```
 
 ## Scripts

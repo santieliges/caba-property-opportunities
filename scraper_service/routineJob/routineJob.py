@@ -127,13 +127,21 @@ class RoutineJob:
         n_pages: int = 5,
         delay_s: float = 0.0,
         jitter_s: float = 0.0,
+        max_existing_hits: int | None = None,
     ):
         await self.scrapper.start()
         try:
+            existing_ids = {
+                int(row["id"])
+                for _, row in self.storage.get_all().iterrows()
+                if row.get("id") is not None
+            }
             new_listings = await self.scrapper.extract_all_pages(
                 n_pages=n_pages,
                 delay_s=delay_s,
                 jitter_s=jitter_s,
+                existing_ids=existing_ids if max_existing_hits else None,
+                max_existing_hits=max_existing_hits,
             )
         finally:
             await self.scrapper.close()

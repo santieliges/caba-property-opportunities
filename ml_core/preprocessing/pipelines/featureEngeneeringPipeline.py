@@ -8,7 +8,8 @@ from ml_core.preprocessing.transformers import (DisposicionEncoder,
                                                 FeatureScaler,
                                                 DistanceToPOITransformer,
                                                 DistanceToPolygonTransformer,
-                                                CountNearbyPOITransformer)
+                                                CountNearbyPOITransformer,
+                                                SalesVelocityTransformer)
 
 
 
@@ -89,6 +90,14 @@ def build_feature_engineering_pipeline():
             )
         ),
         (
+            "velocidad_ventas_1km_90d",
+            SalesVelocityTransformer(
+                radius_meters=1000,
+                window_days=90,
+                prefix="ventas"
+            )
+        ),
+        (
             "encode_estado_ordinal",
             EstadoOrdinalEncoder()
         ),
@@ -117,7 +126,9 @@ def build_feature_engineering_pipeline():
                 'dist_areas_programaticas',
                 'dist_avenida_rivadavia',
                 "n_robos_1000m",
-                "n_universidades_1000m"
+                "n_universidades_1000m",
+                "n_ventas_1000m_90d",
+                "velocidad_ventas_1000m_90d",
             ]
         )),
     ])

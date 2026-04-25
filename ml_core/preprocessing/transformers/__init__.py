@@ -20,7 +20,8 @@ from .featureEngeneeringTransfromers import (
     FeatureScaler,
     DistanceToPOITransformer,
     DistanceToPolygonTransformer,
-    CountNearbyPOITransformer
+    CountNearbyPOITransformer,
+    SalesVelocityTransformer,
     )
 
 __all__ = [
@@ -42,5 +43,6 @@ __all__ = [
     "NumericClipper",
     "DistanceToPOITransformer",
     "DistanceToPolygonTransformer",
-    "CountNearbyPOITransformer"
+    "CountNearbyPOITransformer",
+    "SalesVelocityTransformer",
     ]

@@ -3,6 +3,7 @@ from itertools import product
 from typing import Iterable, Optional, Sequence, Tuple
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 from sklearn.metrics import mean_absolute_error, mean_squared_error, median_absolute_error, r2_score
@@ -268,8 +269,31 @@ class GraphAttentionGCN(BaseModel, nn.Module):
             edge_index = self.edge_index_
             edge_attr = self.edge_attr_
 
-        if edge_index.shape[0] != 2:
+        edge_index = np.asarray(edge_index)
+        edge_attr = np.asarray(edge_attr)
+        num_nodes = len(X)
+
+        if edge_index.ndim != 2 or edge_index.shape[0] != 2:
             raise ValueError("edge_index debe tener shape (2, E)")
+        if edge_attr.ndim != 2:
+            raise ValueError("edge_attr debe tener shape (E, edge_dim)")
+        if edge_index.shape[1] != edge_attr.shape[0]:
+            raise ValueError(
+                "edge_index y edge_attr deben tener la misma cantidad de aristas. "
+                f"Recibido: {edge_index.shape[1]} y {edge_attr.shape[0]}."
+            )
+        if num_nodes == 0:
+            raise ValueError("X no puede estar vacío")
+        if edge_index.shape[1] > 0:
+            min_idx = int(edge_index.min())
+            max_idx = int(edge_index.max())
+            if min_idx < 0 or max_idx >= num_nodes:
+                raise ValueError(
+                    "edge_index contiene nodos fuera de rango para el X provisto. "
+                    f"Rango válido: [0, {num_nodes - 1}], recibido: [{min_idx}, {max_idx}]. "
+                    "Si estás usando un grafo cross-split (train+target), pasá el dataframe "
+                    "combinado correspondiente al hacer predict/tuning."
+                )
 
         x_tensor = torch.as_tensor(np.asarray(X[self.feature_names_].values), dtype=torch.float32, device=self.device)
         edge_index_tensor = torch.as_tensor(edge_index, dtype=torch.long, device=self.device)
@@ -277,9 +301,20 @@ class GraphAttentionGCN(BaseModel, nn.Module):
 
         y_tensor = None
         if y is not None:
+            if len(y) != num_nodes:
+                raise ValueError(
+                    "y y X deben tener la misma cantidad de filas. "
+                    f"Recibido: len(X)={num_nodes}, len(y)={len(y)}."
+                )
             y_tensor = torch.as_tensor(np.asarray(y).reshape(-1, 1), dtype=torch.float32, device=self.device)
 
         return x_tensor, y_tensor, edge_index_tensor, edge_attr_tensor
+
+    @staticmethod
+    def _concat_frames(X_left, X_right):
+        if isinstance(X_left, pd.DataFrame) and isinstance(X_right, pd.DataFrame):
+            return pd.concat([X_left.reset_index(drop=True), X_right.reset_index(drop=True)], ignore_index=True)
+        return np.concatenate([np.asarray(X_left), np.asarray(X_right)], axis=0)
 
     # --- core forward ---------------------------------------------------
     def forward(self, x: torch.Tensor, edge_index: torch.Tensor, edge_attr: torch.Tensor) -> torch.Tensor:
@@ -420,6 +455,29 @@ class GraphAttentionGCN(BaseModel, nn.Module):
                 f"(search_type={search_type}, total_grid={len(all_configs)})."
             )
 
+        val_edge_index_arr = np.asarray(val_edge_index)
+        val_uses_combined_graph = (
+            val_edge_index_arr.size > 0 and int(val_edge_index_arr.max()) >= len(X_val)
+        )
+        if val_uses_combined_graph:
+            expected_nodes = len(X) + len(X_val)
+            max_idx = int(val_edge_index_arr.max())
+            if max_idx >= expected_nodes:
+                raise ValueError(
+                    "val_edge_index referencia más nodos que los disponibles en train+val. "
+                    f"Máximo índice recibido: {max_idx}, nodos esperados: {expected_nodes}."
+                )
+            X_val_eval = self._concat_frames(X, X_val)
+            val_target_slice = slice(len(X), expected_nodes)
+            if verbose:
+                print(
+                    "Detectado grafo de validación cross-split; la evaluación usará "
+                    "el grafo combinado train+val y luego recortará solo los nodos target."
+                )
+        else:
+            X_val_eval = X_val
+            val_target_slice = slice(None)
+
         for cfg in configs_to_run:
             hidden = int(cfg.get("hidden", self.hidden))
             num_heads = int(cfg.get("num_heads", self.num_heads))
@@ -472,10 +530,11 @@ class GraphAttentionGCN(BaseModel, nn.Module):
             )
 
             preds = candidate.predict(
-                X_val,
+                X_val_eval,
                 edge_index=val_edge_index,
                 edge_attr=val_edge_attr,
             )
+            preds = np.asarray(preds).reshape(-1)[val_target_slice]
 
             y_true_eval = np.asarray(y_val).reshape(-1)
             y_pred_eval = np.asarray(preds).reshape(-1)

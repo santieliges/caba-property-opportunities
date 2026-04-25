@@ -1,4 +1,6 @@
 import json
+import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
@@ -76,6 +78,8 @@ def map_aviso_to_inmueble_fields(aviso: Dict[str, Any]) -> Dict[str, Any]:
     estado = aviso.get("Estado_t")
     disposicion = aviso.get("Disposicion_t")
     orientacion = aviso.get("Orientacion_t")
+    informacion_adicional = aviso.get("InformacionAdicional_t")
+    pozo = detect_pozo(aviso)
 
     return {
         "precio": precio,
@@ -95,6 +99,8 @@ def map_aviso_to_inmueble_fields(aviso: Dict[str, Any]) -> Dict[str, Any]:
         "cocheras": cocheras,
         "latitud": lat,
         "longitud": lon,
+        "informacion_adicional": informacion_adicional,
+        "pozo": pozo,
     }
 
 
@@ -146,3 +152,57 @@ def _parse_antiguedad(value):
         if value.strip().lower() in {"a estrenar", "estrenar", "a estrenar."}:
             return 0
     return None
+
+
+def detect_pozo(aviso: Dict[str, Any]) -> int:
+    text_parts = [
+        aviso.get("InformacionAdicional_t"),
+        aviso.get("Titulo_t"),
+        aviso.get("Subtitulo_t"),
+        aviso.get("EstadoEdificio_t"),
+        aviso.get("Estado_t"),
+    ]
+    text = " ".join(part for part in text_parts if isinstance(part, str) and part.strip())
+    normalized_text = _normalize_text(text)
+
+    if not normalized_text:
+        return 0
+
+    strong_patterns = [
+        r"\ben pozo\b",
+        r"\bpozo\b",
+        r"\bpreventa\b",
+        r"\bfideicomiso\b",
+        r"\ben construccion\b",
+        r"\bentrega estimada\b",
+        r"\bfecha de entrega\b",
+        r"\bposesion\b",
+        r"\bunidades? en desarrollo\b",
+    ]
+    payment_patterns = [
+        r"\banticipo\b.{0,80}\bcuotas?\b",
+        r"\bcuotas?\b.{0,80}\banticipo\b",
+        r"\bsaldo\b.{0,80}\bcuotas?\b",
+        r"\bvalor total\b",
+        r"\bfinanciacion\b",
+        r"\bfinanciado\b",
+    ]
+    currency_count = len(re.findall(r"(?:u\$s|usd|\$)\s*\d", normalized_text))
+
+    score = 0
+    if any(re.search(pattern, normalized_text) for pattern in strong_patterns):
+        score += 2
+    if any(re.search(pattern, normalized_text) for pattern in payment_patterns):
+        score += 2
+    if currency_count >= 2:
+        score += 1
+
+    # Un aviso con "pozo" o "preventa" solo ya suele ser suficiente; si no, pedimos
+    # una segunda senal fuerte como esquema de cuotas o multiples montos.
+    return 1 if score >= 2 else 0
+
+
+def _normalize_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value)
+    without_accents = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return without_accents.lower()

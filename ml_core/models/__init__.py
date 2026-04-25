@@ -1,20 +1,34 @@
 from .baseModel import BaseModel
 from .gwrmodel import GWRModel
-
-from .gnn_price_model import RentalPriceGNN
 from .rfrkModel import RegressionKrigingModel
 from .sarModel import SpatialAutoregressiveModel
-from .gat_gcn_model import GraphAttentionGCN, GraphAttentionLayer
 
 __all__ = [
     "BaseModel",
     "GWRModel",
-    "ModelEvaluator",
-    "SpatialOutlierAnalyzer",
-    "RentalPriceGNN",
     "RegressionKrigingModel",
     "SpatialAutoregressiveModel",
-    "SpatialOutlierDetector",
-    "GraphAttentionGCN",
-    "GraphAttentionLayer",
 ]
+
+
+def _optional_imports() -> None:
+    try:
+        from .gnn_price_model import RentalPriceGNN
+    except Exception:
+        pass
+    else:
+        globals()["RentalPriceGNN"] = RentalPriceGNN
+        __all__.append("RentalPriceGNN")
+
+    try:
+        from .gat_gcn_model import GraphAttentionGCN, GraphAttentionLayer
+    except Exception:
+        pass
+    else:
+        globals()["GraphAttentionGCN"] = GraphAttentionGCN
+        globals()["GraphAttentionLayer"] = GraphAttentionLayer
+        __all__.extend(["GraphAttentionGCN", "GraphAttentionLayer"])
+
+
+_optional_imports()
+del _optional_imports
