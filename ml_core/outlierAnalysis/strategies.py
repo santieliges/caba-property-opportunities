@@ -1,10 +1,12 @@
 import numpy as np
 import pandas as pd
+from scipy import stats
 
 class Strategy:
 
-    def __init__(self, name):
+    def __init__(self, name, requires_weights=False):
         self.name = name
+        self.requires_weights = requires_weights
 
     def run(self, **kwargs):
         raise NotImplementedError("Subclasses must implement this method.")
@@ -12,7 +14,7 @@ class Strategy:
 class NegativeResidualsStrategy(Strategy):
 
     def __init__(self):
-        super().__init__("negative")
+        super().__init__("negative", requires_weights=False)
 
     def run(self, res, gdf, output_dir, model_name, **kwargs):
 
@@ -22,17 +24,12 @@ class NegativeResidualsStrategy(Strategy):
             .sort_values("residuo", ascending=True)
         )
 
-        gdf_neg.to_csv(
-            f"{output_dir}/residuos_negativos_{model_name}.csv",
-            index=False
-        )
-
         return gdf_neg
 
 class ZTestStrategy(Strategy):
 
     def __init__(self):
-        super().__init__("ztest")
+        super().__init__("ztest", requires_weights=True)
 
     def run(self, res, gdf, detector, w, params_for_method, output_dir, model_name, **kwargs):
 
@@ -83,17 +80,12 @@ class ZTestStrategy(Strategy):
 
         z_df = z_df.sort_values("abs_z_score", ascending=False)
 
-        z_df.to_csv(
-            f"{output_dir}/outliers_ztest_{model_name}.csv",
-            index=False
-        )
-
         return z_df
 
 class QuantileStrategy(Strategy):
 
     def __init__(self):
-        super().__init__("quantile")
+        super().__init__("quantile", requires_weights=False)
 
     def run(self, res, gdf, detector, coords, output_dir, model_name, params_for_method, **kwargs):
 
@@ -128,17 +120,12 @@ class QuantileStrategy(Strategy):
             )
             gdf_quant = gdf_quant.sort_values("outlier_score", ascending=False)
 
-        gdf_quant.to_csv(
-            f"{output_dir}/outliers_quantile_{model_name}.csv",
-            index=False
-        )
-
         return gdf_quant
 
 class LISAStrategy(Strategy):
 
     def __init__(self):
-        super().__init__("lisa")
+        super().__init__("lisa", requires_weights=True)
 
     def run(self, res, gdf, detector, coords, w, output_dir, model_name, **kwargs):
 
@@ -152,9 +139,59 @@ class LISAStrategy(Strategy):
 
         gdf_lisa_lh = gdf.iloc[spatial_lh]
 
-        gdf_lisa_lh.to_csv(
-            f"{output_dir}/outliers_LISA_{model_name}.csv",
-            index=False
-        )
-
         return gdf_lisa_lh
+
+
+class CombinedZLisaStrategy(Strategy):
+
+    def __init__(self):
+        super().__init__("combined_z_lisa", requires_weights=True)
+
+    def run(self, res, gdf, detector, w, coords, output_dir, model_name, params_for_method, **kwargs):
+        alpha = params_for_method.get("alpha", 0.05)  # Nivel de significancia
+
+        # 1. Z-test robusto y espacial (cola inferior)
+        z_outliers = detector.z_test_outliers(
+            y=res,
+            w=w,
+            robust=True,  # Siempre robusto con MAD
+            z_threshold=params_for_method.get("z_threshold", 3.0),
+        )
+        z_scores = z_outliers["z_scores"]
+
+        # P-values para cola inferior (valores bajos atípicos)
+        # Para z_score negativo (bajo), p_value = P(Z <= z_score) = norm.cdf(z_score)
+        # Para z_score positivo, p_value = 1 (no atípico bajo)
+        p_values_z = np.where(z_scores < 0, stats.norm.cdf(z_scores), 1.0)
+
+        # 2. LISA con Local Moran's I
+        lisa_results = detector.local_morans_I(
+            y=res,
+            w=w,
+            coords=coords
+        )
+        p_values_lisa = lisa_results["p_sim"]
+        quadrants = lisa_results["quadrant"]
+
+        # 3. Score combinado
+        # Factor basado en cuadrante
+        factor = np.zeros(len(quadrants))
+        factor[quadrants == "LL"] = 1
+        factor[(quadrants == "LH") | (quadrants == "HH")] = 0
+        factor[quadrants == "HL"] = -1
+
+        # Score = (1 - p_Z) + (1 - p_LISA) * factor
+        score = (1 - p_values_z) + (1 - p_values_lisa) * factor
+
+        # Crear DataFrame con todos los valores
+        gdf_combined = gdf.copy()
+        gdf_combined["z_score"] = z_scores
+        gdf_combined["p_value_z"] = p_values_z
+        gdf_combined["p_value_lisa"] = p_values_lisa
+        gdf_combined["quadrant"] = quadrants
+        gdf_combined["combined_score"] = score
+        gdf_combined["residuo"] = res
+        gdf_combined["is_outlier"] = p_values_z < alpha  # Columna para marcar outliers
+
+        # Guardar CSV con todos los valores y la marca de outlier
+        return gdf_combined
