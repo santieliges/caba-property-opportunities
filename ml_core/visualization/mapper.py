@@ -5,9 +5,12 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Point
-import seaborn as sns
 import matplotlib.pyplot as plt
 from shapely.ops import unary_union
+import folium
+from branca.element import Element
+from pathlib import Path
+from abc import ABC, abstractmethod
 
 def generar_grid_predicciones(
     model,
@@ -232,3 +235,224 @@ class MapaPrecio:
             dpi=dpi,
             bbox_inches="tight"
         )
+
+
+# Clase base para visualizadores de mapas de outliers
+class OutlierMapVisualizer(ABC):
+    def __init__(self, gdf_all, results_df, method_name, barrios_path=None):
+        self.gdf_all = gdf_all
+        self.results_df = results_df.copy()
+        if "method" in self.results_df.columns and method_name is not None:
+            self.results_df = self.results_df.loc[self.results_df["method"] == method_name].copy()
+        self.method_name = method_name
+        self.barrios_path = barrios_path or "../GeoData/barrios.geojson"
+        self.map_df = None
+        self.folium_map = None
+
+    def prepare_data(self):
+        """Prepara los datos fusionando gdf_all con results."""
+        if self.results_df.empty:
+            raise ValueError(f"No hay resultados para el método {self.method_name}.")
+
+        # Mantener solo columnas relevantes y eliminar duplicados
+        keep_cols = [col for col in self.results_df.columns if col not in ["method", "fold"]]
+        self.results_df = self.results_df[keep_cols].drop_duplicates(subset=["idx"], keep="first")
+
+        self.map_df = self.gdf_all.merge(self.results_df, on="idx", how="left")
+        self._add_default_columns()
+
+    def _add_default_columns(self):
+        """Método hook para subclases agregar columnas por defecto."""
+        pass
+
+    def create_base_map(self):
+        """Crea el mapa base con Folium."""
+        centro_caba = [self.map_df["latitud"].median(), self.map_df["longitud"].median()]
+        self.folium_map = folium.Map(location=centro_caba, zoom_start=11, tiles="CartoDB positron")
+
+        if self.barrios_path and Path(self.barrios_path).exists():
+            barrios = gpd.read_file(self.barrios_path)
+            if barrios.crs is not None:
+                barrios = barrios.to_crs("EPSG:4326")
+            folium.GeoJson(
+                barrios.__geo_interface__,
+                name="Barrios CABA",
+                style_function=lambda _: {"fillColor": "#00000000", "color": "#4b5563", "weight": 1},
+            ).add_to(self.folium_map)
+
+    @abstractmethod
+    def get_marker_style(self, row):
+        """Define el estilo del marcador para cada fila."""
+        pass
+
+    @abstractmethod
+    def get_tooltip(self, row):
+        """Define el tooltip para cada marcador."""
+        pass
+
+    @abstractmethod
+    def get_popup_html(self, row):
+        """Define el popup HTML para cada marcador."""
+        pass
+
+    def add_markers(self):
+        """Agrega marcadores al mapa."""
+        for _, row in self.map_df.iterrows():
+            style = self.get_marker_style(row)
+            marker = folium.CircleMarker(
+                location=[row["latitud"], row["longitud"]],
+                **style
+            )
+            marker.add_child(folium.Tooltip(self.get_tooltip(row)))
+            marker.add_child(folium.Popup(self.get_popup_html(row)))
+            marker.add_to(self.folium_map)
+
+    def build_map(self):
+        """Construye el mapa completo."""
+        self.prepare_data()
+        self.create_base_map()
+        self.add_markers()
+        return self.folium_map
+
+    def save_map(self, path):
+        """Guarda el mapa como HTML."""
+        if self.folium_map is None:
+            self.build_map()
+        self.folium_map.save(path)
+
+
+# Subclase para ZTest
+class ZTestMapVisualizer(OutlierMapVisualizer):
+    def __init__(self, gdf_all, results_df, barrios_path=None):
+        super().__init__(gdf_all, results_df, "ztest", barrios_path)
+
+    def _add_default_columns(self):
+        self.map_df["es_atipico_ztest"] = self.map_df["z_score"].notna()
+        self.map_df["tipo_valor_atipico"] = self.map_df["tipo_valor_atipico"].fillna("NO_ATIPICO")
+        self.map_df["severidad_valor_atipico"] = self.map_df["severidad_valor_atipico"].fillna("NO_ATIPICO")
+        self.map_df["abs_z_score"] = self.map_df["abs_z_score"].fillna(0.0)
+
+    def get_marker_style(self, row):
+        if row["tipo_valor_atipico"] == "ALTO":
+            intensity = min(row["abs_z_score"] / 3.0, 1.0)  # Normalizar a 3.0 como max
+            color = self._lerp_color("#fca5a5", "#991b1b", intensity)
+            return {"color": color, "fillColor": color, "radius": 4 + intensity * 4, "fillOpacity": 0.9, "weight": 1}
+        elif row["tipo_valor_atipico"] == "BAJO":
+            intensity = min(row["abs_z_score"] / 3.0, 1.0)
+            color = self._lerp_color("#93c5fd", "#1d4ed8", intensity)
+            return {"color": color, "fillColor": color, "radius": 4 + intensity * 4, "fillOpacity": 0.9, "weight": 1}
+        else:
+            return {"color": "#9ca3af", "fillColor": "#9ca3af", "radius": 2, "fillOpacity": 0.35, "weight": 0.5}
+
+    def get_tooltip(self, row):
+        if pd.notna(row.get("z_score")) and pd.notna(row.get("precio")):
+            return f"{row['tipo_valor_atipico']} | z={row['z_score']:.2f} | USD {row['precio']:,.0f}"
+        else:
+            return f"Precio: USD {row['precio']:,.0f} | {row['area_m2_total']:,.0f} m² | {row['ambientes']:,.0f} amb"
+
+    def get_popup_html(self, row):
+        precio = row.get("precio")
+        area = row.get("area_m2_total")
+        ambientes = row.get("ambientes")
+        antiguedad = row.get("antiguedad")
+        url = row.get("url")
+        z_score = row.get("z_score")
+        tipo = row.get("tipo_valor_atipico")
+        severidad = row.get("severidad_valor_atipico")
+
+        precio_txt = f"USD {precio:,.0f}" if pd.notna(precio) else "N/D"
+        area_txt = f"{area:,.0f} m²" if pd.notna(area) else "N/D"
+        ambientes_txt = f"{ambientes:,.0f}" if pd.notna(ambientes) else "N/D"
+        antiguedad_txt = f"{antiguedad:,.0f} años" if pd.notna(antiguedad) else "N/D"
+        z_score_txt = f"{z_score:.2f}" if pd.notna(z_score) else "N/D"
+        link_html = f'<a href="{url}" target="_blank">Ver publicación</a>' if url else "Sin link"
+
+        return (
+            f"<b>Precio:</b> {precio_txt}<br>"
+            f"<b>Superficie:</b> {area_txt}<br>"
+            f"<b>Ambientes:</b> {ambientes_txt}<br>"
+            f"<b>Antigüedad:</b> {antiguedad_txt}<br>"
+            f"<b>Tipo atípico:</b> {tipo}<br>"
+            f"<b>Severidad:</b> {severidad}<br>"
+            f"<b>Z-score:</b> {z_score_txt}<br>"
+            f"{link_html}"
+        )
+
+    @staticmethod
+    def _lerp_color(a, b, amount):
+        ah = int(a[1:], 16)
+        bh = int(b[1:], 16)
+        ar, ag, ab = (ah >> 16) & 0xFF, (ah >> 8) & 0xFF, ah & 0xFF
+        br, bg, bb = (bh >> 16) & 0xFF, (bh >> 8) & 0xFF, bh & 0xFF
+        rr = int(ar + amount * (br - ar))
+        rg = int(ag + amount * (bg - ag))
+        rb = int(ab + amount * (bb - ab))
+        return f"#{rr:02x}{rg:02x}{rb:02x}"
+
+
+# Subclase para Combined Z + LISA
+class CombinedZLisaMapVisualizer(OutlierMapVisualizer):
+    def __init__(self, gdf_all, results_df, barrios_path=None):
+        super().__init__(gdf_all, results_df, "combined_z_lisa", barrios_path)
+
+    def _add_default_columns(self):
+        self.map_df["is_outlier"] = self.map_df["is_outlier"].fillna(False)
+        self.map_df["combined_score"] = self.map_df["combined_score"].fillna(0.0)
+
+    def get_marker_style(self, row):
+        if row["is_outlier"]:
+            intensity = min(abs(row["combined_score"]) / 2.0, 1.0)  # Normalizar score
+            if row["combined_score"] > 0:
+                color = self._lerp_color("#fca5a5", "#991b1b", intensity)  # Rojos para positivos
+            else:
+                color = self._lerp_color("#93c5fd", "#1d4ed8", intensity)  # Azules para negativos
+            return {"color": color, "fillColor": color, "radius": 4 + intensity * 4, "fillOpacity": 0.9, "weight": 1}
+        else:
+            return {"color": "#9ca3af", "fillColor": "#9ca3af", "radius": 2, "fillOpacity": 0.35, "weight": 0.5}
+
+    def get_tooltip(self, row):
+        if row["is_outlier"]:
+            return f"Outlier | Score={row['combined_score']:.2f} | USD {row['precio']:,.0f}"
+        else:
+            return f"No outlier | USD {row['precio']:,.0f}"
+
+    def get_popup_html(self, row):
+        precio = row.get("precio")
+        area = row.get("area_m2_total")
+        ambientes = row.get("ambientes")
+        url = row.get("url")
+        score = row.get("combined_score")
+        quadrant = row.get("quadrant")
+        p_z = row.get("p_value_z")
+        p_lisa = row.get("p_value_lisa")
+
+        precio_txt = f"USD {precio:,.0f}" if pd.notna(precio) else "N/D"
+        area_txt = f"{area:,.0f} m²" if pd.notna(area) else "N/D"
+        ambientes_txt = f"{ambientes:,.0f}" if pd.notna(ambientes) else "N/D"
+        score_txt = f"{score:.2f}" if pd.notna(score) else "N/D"
+        quadrant_txt = quadrant if quadrant else "N/D"
+        p_z_txt = f"{p_z:.3f}" if pd.notna(p_z) else "N/D"
+        p_lisa_txt = f"{p_lisa:.3f}" if pd.notna(p_lisa) else "N/D"
+        link_html = f'<a href="{url}" target="_blank">Ver publicación</a>' if url else "Sin link"
+
+        return (
+            f"<b>Precio:</b> {precio_txt}<br>"
+            f"<b>Superficie:</b> {area_txt}<br>"
+            f"<b>Ambientes:</b> {ambientes_txt}<br>"
+            f"<b>Score combinado:</b> {score_txt}<br>"
+            f"<b>Cuadrante LISA:</b> {quadrant_txt}<br>"
+            f"<b>P-value Z:</b> {p_z_txt}<br>"
+            f"<b>P-value LISA:</b> {p_lisa_txt}<br>"
+            f"{link_html}"
+        )
+
+    @staticmethod
+    def _lerp_color(a, b, amount):
+        ah = int(a[1:], 16)
+        bh = int(b[1:], 16)
+        ar, ag, ab = (ah >> 16) & 0xFF, (ah >> 8) & 0xFF, ah & 0xFF
+        br, bg, bb = (bh >> 16) & 0xFF, (bh >> 8) & 0xFF, bh & 0xFF
+        rr = int(ar + amount * (br - ar))
+        rg = int(ag + amount * (bg - ag))
+        rb = int(ab + amount * (bb - ab))
+        return f"#{rr:02x}{rg:02x}{rb:02x}"

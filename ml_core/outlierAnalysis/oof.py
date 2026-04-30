@@ -16,6 +16,7 @@ from .strategies import (
     NegativeResidualsStrategy,
     QuantileStrategy,
     ZTestStrategy,
+    CombinedZLisaStrategy,
 )
 
 
@@ -24,6 +25,7 @@ DEFAULT_STRATEGIES = {
     "ztest": ZTestStrategy(),
     "quantile": QuantileStrategy(),
     "lisa": LISAStrategy(),
+    "combined_z_lisa": CombinedZLisaStrategy(),
 }
 
 
@@ -39,6 +41,7 @@ def detect_model_outliers(
     k_neighbors=15,
     strategies=None,
     model_name=None,
+    w=None,
     **legacy_params_for_methods,
 ):
 
@@ -75,17 +78,20 @@ def detect_model_outliers(
 
     results = {}
 
-    w = None
-    if any(
-        method in methods
-        for method in ["ztest", "lisa"]
-    ):
-        w = Kernel(
-            coords_arr,
-            k=k_neighbors,
-            function="gaussian",
-            fixed=False,
+    # Crear w si no se pasa y alguna estrategia lo requiere
+    if w is None:
+        needs_weights = any(
+            strategies[method].requires_weights
+            for method in methods
+            if method in strategies
         )
+        if needs_weights:
+            w = Kernel(
+                coords_arr,
+                k=k_neighbors,
+                function="gaussian",
+                fixed=False,
+            )
 
     for method in methods:
         if method not in strategies:
@@ -149,7 +155,8 @@ def detect_outliers_oof(
         exist_ok=True,
     )
 
-    all_results = []
+    current_model_name = model_name
+    all_results = {}
     all_residuals = np.full(
         len(y),
         np.nan,
@@ -164,6 +171,9 @@ def detect_outliers_oof(
         print(f"\nFold {fold}/{n_splits}")
 
         model = model_factory()
+
+        if current_model_name is None:
+            current_model_name = model.__class__.__name__
 
         X_train = _slice_like(
             X,
@@ -275,37 +285,34 @@ def detect_outliers_oof(
                 + other_cols
             ]
 
-            all_results.append(result_df)
+            all_results.setdefault(method_name, []).append(result_df)
 
-    if all_results:
-        all_results_df = pd.concat(
-            all_results,
-            ignore_index=True,
+    aggregated_results = {}
+    for method_name, result_frames in all_results.items():
+        if result_frames:
+            aggregated_df = pd.concat(
+                result_frames,
+                ignore_index=True,
+            )
+        else:
+            aggregated_df = pd.DataFrame()
+
+        aggregated_df.to_csv(
+            output_dir / f"outliers_{method_name}_{current_model_name}.csv",
+            index=False,
         )
-    else:
-        all_results_df = pd.DataFrame(
-            columns=[
-                "idx",
-                "url",
-                "precio",
-                "fold",
-                "method",
-            ]
-        )
+        aggregated_results[method_name] = aggregated_df
 
-    for csv_path in output_dir.glob("*.csv"):
-        csv_path.unlink()
+    concat_path = output_dir / "outliers_oof_concat.csv"
+    if concat_path.exists():
+        concat_path.unlink()
 
-    all_results_df.to_csv(
-        output_dir / "outliers_oof_concat.csv",
-        index=False,
-    )
     np.save(
         output_dir / "residuals_oof.npy",
         all_residuals,
     )
 
-    return all_results_df, all_residuals
+    return aggregated_results, all_residuals
 
 
 def load_active_processed_geodata(
