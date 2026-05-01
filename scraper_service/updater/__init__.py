@@ -1,3 +1,3 @@
-from updater.updater import Updater
+from .updater import Updater
 
 __all__ = ["Updater"]

@@ -1,0 +1,43 @@
+{
+  "model_class": "RegressionKrigingModel",
+  "saved_at_utc": "2026-04-30T02:42:44.022885+00:00",
+  "rf_params": {
+    "n_estimators": 500,
+    "max_depth": null,
+    "min_samples_leaf": 1,
+    "max_features": 0.5,
+    "bootstrap": true,
+    "min_samples_split": 2
+  },
+  "kriging_params": {
+    "n_closest_points": 7,
+    "variogram_model": "linear",
+    "pseudo_inv": true,
+    "pseudo_inv_type": "pinvh"
+  },
+  "target": "log_precio",
+  "features": [
+    "area_m2_total",
+    "area_m2_descubierta",
+    "ambientes",
+    "antiguedad",
+    "expensas",
+    "banos",
+    "cocheras",
+    "estado_num",
+    "disposicion_Frente",
+    "disposicion_Contrafrente",
+    "disposicion_Lateral",
+    "dist_subte",
+    "dist_universidad",
+    "dist_hospital",
+    "dist_est_educativo",
+    "dist_espacio_verde",
+    "dist_areas_programaticas",
+    "dist_avenida_rivadavia",
+    "n_robos_1000m",
+    "n_universidades_1000m",
+    "pozo",
+    "velocidad_ventas_1000m_90d"
+  ]
+}

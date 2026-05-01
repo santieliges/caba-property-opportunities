@@ -1,7 +1,7 @@
 import asyncio
 
-from scrapper.ArgenPropScrapper import InmuebleData
-from scrapper.SosivaApiClient import (
+from scraper_service.scrapper.ArgenPropScrapper import InmuebleData
+from scraper_service.scrapper.SosivaApiClient import (
     SosivaApiClient,
     map_aviso_to_inmueble_fields,
 )

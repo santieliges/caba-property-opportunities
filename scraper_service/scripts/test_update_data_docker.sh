@@ -10,7 +10,7 @@ HEADLESS=${HEADLESS:-1}
 cd "$ROOT_DIR"
 
 echo "Construyendo imagen $IMAGE_NAME"
-docker build -f scraper_service/Dockerfile -t "$IMAGE_NAME" .
+docker build -f scraper_service/Dockerfile -t "$IMAGE_NAME" scraper_service
 
 echo "Probando scraper_service.update_data en Docker con HEADLESS=$HEADLESS"
 exec docker run --rm -it \

@@ -2,16 +2,16 @@ import asyncio
 import logging
 import random
 
-from scrapper import Scrapper
-from storage.storage import Storage
-from sync.sync import Synchronizer
-from updater.updater import Updater
+from scraper_service.scrapper import BaseScrapper
+from scraper_service.storage.storage import Storage
+from scraper_service.sync.sync import Synchronizer
+from scraper_service.updater.updater import Updater
 
 logger = logging.getLogger(__name__)
 
 
 class RoutineJob:
-    def __init__(self, storage: Storage, scrapper: Scrapper, updater: Updater, synchronizer: Synchronizer):
+    def __init__(self, storage: Storage, scrapper: BaseScrapper, updater: Updater, synchronizer: Synchronizer):
         self.storage = storage
         self.scrapper = scrapper
         self.updater = updater

@@ -1,0 +1,44 @@
+{
+  "model_class": "GraphAttentionGCN",
+  "saved_at_utc": "2026-05-01T04:03:06.724439+00:00",
+  "best_params_": {
+    "hidden": 128,
+    "num_layers": 3,
+    "num_heads": 2,
+    "dropout": 0.45,
+    "lr": 0.0005,
+    "weight_decay": 0.001,
+    "loss_name": "huber",
+    "huber_delta": 0.3,
+    "grad_clip_norm": 7.0
+  },
+  "target": "log_precio",
+  "features": [
+    "area_m2_total_scaled",
+    "area_m2_descubierta_scaled",
+    "ambientes_scaled",
+    "antiguedad_scaled",
+    "expensas_scaled",
+    "banos_scaled",
+    "cocheras_scaled",
+    "estado_num",
+    "disposicion_Frente",
+    "disposicion_Contrafrente",
+    "disposicion_Lateral",
+    "dist_subte_scaled",
+    "dist_universidad_scaled",
+    "dist_hospital_scaled",
+    "dist_est_educativo_scaled",
+    "dist_espacio_verde_scaled",
+    "dist_areas_programaticas_scaled",
+    "dist_avenida_rivadavia_scaled",
+    "n_robos_1000m_scaled",
+    "n_universidades_1000m_scaled",
+    "pozo"
+  ],
+  "graph_params": {
+    "k_neighbors": 15,
+    "radius_km": 3.0,
+    "bandwidth_km": 2.0
+  }
+}

@@ -3,11 +3,11 @@ import logging
 import os
 from pathlib import Path
 
-from routineJob.routineJob import RoutineJob
-from scrapper.ArgenPropScrapper import ArgenPropScrapper
-from storage.storage import CSVStorage
-from sync.sync import Synchronizer
-from updater.updater import Updater
+from scraper_service.routineJob.routineJob import RoutineJob
+from scraper_service.scrapper.ArgenPropScrapper import ArgenPropScrapper
+from scraper_service.storage.storage import CSVStorage
+from scraper_service.sync.sync import Synchronizer
+from scraper_service.updater.updater import Updater
 
 logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent

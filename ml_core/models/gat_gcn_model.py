@@ -7,7 +7,9 @@ import pandas as pd
 import torch
 import torch.nn as nn
 from sklearn.metrics import mean_absolute_error, mean_squared_error, median_absolute_error, r2_score
+from sklearn.neighbors import BallTree
 
+from ..preprocessing.knhs import KNHS
 from .baseModel import BaseModel
 
 
@@ -123,7 +125,13 @@ class GraphAttentionLayer(nn.Module):
 
 
 class GraphAttentionGCN(BaseModel, nn.Module):
-    """End-to-end regression model using stacked GraphAttentionLayer blocks."""
+    """End-to-end regression model using stacked GraphAttentionLayer blocks.
+
+    El flujo esperado del modelo es espacial: `coords` debe pasarse en `fit()`
+    para que el modelo pueda cachear el estado del grafo de train y luego
+    construir grafos cross-split en `predict()`. Si además se proveen
+    `edge_index` y `edge_attr`, esos grafos manuales tienen prioridad.
+    """
 
     def __init__(
         self,
@@ -141,6 +149,12 @@ class GraphAttentionGCN(BaseModel, nn.Module):
         loss_name: str = "mse",
         huber_delta: float = 1.0,
         grad_clip_norm: Optional[float] = None,
+        k_neighbors: int = 15,
+        radius_km: float = 3.0,
+        bandwidth_km: float = 2.0,
+        graph_distance: str = "euclidean",
+        add_reverse_edges: bool = True,
+        coord_feature_names: Sequence[str] = ("longitud", "latitud"),
     ):
         BaseModel.__init__(self)
         nn.Module.__init__(self)
@@ -159,6 +173,13 @@ class GraphAttentionGCN(BaseModel, nn.Module):
         self.loss_name = loss_name
         self.huber_delta = huber_delta
         self.grad_clip_norm = grad_clip_norm
+        self.k_neighbors = k_neighbors
+        self.radius_km = radius_km
+        self.bandwidth_km = bandwidth_km
+        self.graph_distance = graph_distance
+        self.add_reverse_edges = add_reverse_edges
+        self.coord_feature_names = tuple(coord_feature_names)
+        self.weight_cols_ = [f"w_{col}" for col in self.feature_names_]
 
         self._build_network()
 
@@ -166,6 +187,8 @@ class GraphAttentionGCN(BaseModel, nn.Module):
         self.edge_index_ = None
         self.edge_attr_ = None
         self.tuning_results_ = None
+        self.coords_train_ = None
+        self._graph_state_ = None
 
     @staticmethod
     def _smape(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -232,6 +255,9 @@ class GraphAttentionGCN(BaseModel, nn.Module):
         self.huber_delta = float(config.get("huber_delta", self.huber_delta))
         grad_clip_norm = config.get("grad_clip_norm", self.grad_clip_norm)
         self.grad_clip_norm = None if grad_clip_norm is None else float(grad_clip_norm)
+        self.k_neighbors = int(config.get("k_neighbors", self.k_neighbors))
+        self.radius_km = float(config.get("radius_km", self.radius_km))
+        self.bandwidth_km = float(config.get("bandwidth_km", self.bandwidth_km))
         self._build_network()
 
     @staticmethod
@@ -316,6 +342,177 @@ class GraphAttentionGCN(BaseModel, nn.Module):
             return pd.concat([X_left.reset_index(drop=True), X_right.reset_index(drop=True)], ignore_index=True)
         return np.concatenate([np.asarray(X_left), np.asarray(X_right)], axis=0)
 
+    def _coords_to_latlon_radians(self, coords) -> np.ndarray:
+        coords_arr = np.asarray(coords, dtype=float)
+        if coords_arr.ndim != 2 or coords_arr.shape[1] != 2:
+            raise ValueError(
+                "coords debe tener shape (n, 2). "
+                f"Recibido: {coords_arr.shape}."
+            )
+
+        names = tuple(name.lower() for name in self.coord_feature_names)
+        if len(names) == 2 and "long" in names[0] and "lat" in names[1]:
+            coords_arr = coords_arr[:, [1, 0]]
+
+        if np.nanmax(np.abs(coords_arr)) > math.pi + 1e-6:
+            coords_arr = np.deg2rad(coords_arr)
+
+        return coords_arr
+
+    def _compute_local_feature_weights(
+        self,
+        X_df,
+        y_array,
+        coords_latlon_rad,
+    ) -> np.ndarray:
+        X_arr = np.asarray(X_df[self.feature_names_].to_numpy(), dtype=float)
+        y_arr = np.asarray(y_array, dtype=float).reshape(-1)
+        n_rows, n_features = X_arr.shape
+        tree = BallTree(coords_latlon_rad, metric="haversine")
+        weights = np.zeros((n_rows, n_features), dtype=float)
+
+        for i in range(n_rows):
+            dist, idx = tree.query(
+                coords_latlon_rad[i:i + 1],
+                k=min(self.k_neighbors + 1, n_rows),
+            )
+            dist = dist.ravel() * 6371.0
+            idx = idx.ravel()
+            mask = dist > 0
+            dist, idx = dist[mask], idx[mask]
+            if len(idx) == 0:
+                weights[i] = 1.0
+                continue
+
+            kernel = np.exp(-(dist ** 2) / (self.bandwidth_km ** 2))
+            X_neighbors = X_arr[idx]
+            A = X_neighbors * kernel[:, None]
+            AtY = A.T @ y_arr[idx]
+
+            beta = None
+            ridge = 1e-6
+            for _ in range(6):
+                AtX = A.T @ X_neighbors + np.eye(n_features) * ridge
+                try:
+                    beta = np.linalg.solve(AtX, AtY)
+                    break
+                except np.linalg.LinAlgError:
+                    ridge *= 10.0
+
+            if beta is None:
+                AtX = A.T @ X_neighbors + np.eye(n_features) * ridge
+                beta = np.linalg.pinv(AtX) @ AtY
+
+            beta = np.nan_to_num(beta, nan=0.0, posinf=0.0, neginf=0.0)
+            weights[i] = np.maximum(np.abs(beta), 1e-8)
+
+        return weights
+
+    def _project_local_feature_weights(
+        self,
+        weights_source: np.ndarray,
+        coords_source_latlon_rad: np.ndarray,
+        coords_target_latlon_rad: np.ndarray,
+    ) -> np.ndarray:
+        tree = BallTree(coords_source_latlon_rad, metric="haversine")
+        k_proj = min(self.k_neighbors, len(coords_source_latlon_rad))
+        dist_proj, idx_proj = tree.query(coords_target_latlon_rad, k=k_proj)
+        kernel_proj = np.exp(-((dist_proj * 6371.0) ** 2) / (self.bandwidth_km ** 2))
+        kernel_proj = kernel_proj / (kernel_proj.sum(axis=1, keepdims=True) + 1e-9)
+        return (kernel_proj[..., None] * weights_source[idx_proj]).sum(axis=1)
+
+    def _build_weighted_graph_frame(
+        self,
+        X_df,
+        coords_latlon_rad: np.ndarray,
+        weights: Optional[np.ndarray] = None,
+    ) -> pd.DataFrame:
+        graph = X_df[self.feature_names_].copy().reset_index(drop=True)
+        graph["lat_deg"] = np.rad2deg(coords_latlon_rad[:, 0])
+        graph["lon_deg"] = np.rad2deg(coords_latlon_rad[:, 1])
+        if weights is not None:
+            for col, vals in zip(self.weight_cols_, weights.T):
+                graph[col] = vals
+        return graph
+
+    def _build_knhs_builder(self) -> KNHS:
+        return KNHS(
+            lat_col="lat_deg",
+            lon_col="lon_deg",
+            feature_cols=self.feature_names_,
+            weight_cols=self.weight_cols_ if self.graph_distance == "local_weighted" else None,
+            distance=self.graph_distance,
+            radius_km=self.radius_km,
+            k=self.k_neighbors,
+            add_reverse=self.add_reverse_edges,
+        )
+
+    def _cache_graph_state(self, X, y, coords) -> None:
+        coords_train_latlon_rad = self._coords_to_latlon_radians(coords)
+        weights_train = None
+        if self.graph_distance == "local_weighted":
+            weights_train = self._compute_local_feature_weights(
+                X,
+                y,
+                coords_train_latlon_rad,
+            )
+        graph_train = self._build_weighted_graph_frame(
+            X,
+            coords_train_latlon_rad,
+            weights_train,
+        )
+        self._graph_state_ = {
+            "coords_train_latlon_rad": coords_train_latlon_rad,
+            "weights_train": weights_train,
+            "graph_train": graph_train,
+            "builder": self._build_knhs_builder(),
+        }
+
+    def _build_cross_graph_for_predict(self, X_target, coords_target):
+        if self._graph_state_ is None or self.X_train_ is None or self.y_train_ is None:
+            raise ValueError(
+                "No hay estado de grafo cacheado de train. "
+                "Entrena el modelo con coords o pasa edge_index/edge_attr explicitamente."
+            )
+
+        coords_target_latlon_rad = self._coords_to_latlon_radians(coords_target)
+        weights_target = None
+        if self.graph_distance == "local_weighted":
+            weights_target = self._project_local_feature_weights(
+                self._graph_state_["weights_train"],
+                self._graph_state_["coords_train_latlon_rad"],
+                coords_target_latlon_rad,
+            )
+        graph_target = self._build_weighted_graph_frame(
+            X_target,
+            coords_target_latlon_rad,
+            weights_target,
+        )
+        X_eval = self._concat_frames(self.X_train_, X_target)
+        _, edge_index, edge_attr, target_mask = self._graph_state_["builder"].build_cross_split(
+            self._graph_state_["graph_train"],
+            graph_target,
+        )
+        return X_eval, edge_index, edge_attr, target_mask
+
+    def _build_graph_for_fit(self, X, y, coords):
+        coords_latlon_rad = self._coords_to_latlon_radians(coords)
+        weights = None
+        if self.graph_distance == "local_weighted":
+            weights = self._compute_local_feature_weights(
+                X,
+                y,
+                coords_latlon_rad,
+            )
+        graph = self._build_weighted_graph_frame(
+            X,
+            coords_latlon_rad,
+            weights,
+        )
+        builder = self._build_knhs_builder()
+        edge_index, edge_attr = builder.build(graph)
+        return edge_index, edge_attr
+
     # --- core forward ---------------------------------------------------
     def forward(self, x: torch.Tensor, edge_index: torch.Tensor, edge_attr: torch.Tensor) -> torch.Tensor:
         h = x
@@ -328,12 +525,27 @@ class GraphAttentionGCN(BaseModel, nn.Module):
         self,
         X,
         y,
-        coords=None,
+        coords,
         *,
-        edge_index: np.ndarray,
-        edge_attr: np.ndarray,
+        edge_index: Optional[np.ndarray] = None,
+        edge_attr: Optional[np.ndarray] = None,
         epochs: int = 200,
     ):
+        if coords is None:
+            raise ValueError(
+                "GraphAttentionGCN requiere `coords` en fit(). "
+                "El modelo usa las coordenadas para cachear el estado del "
+                "grafo de train y construir grafos cross-split en predict()."
+            )
+
+        if (edge_index is None) != (edge_attr is None):
+            raise ValueError(
+                "edge_index y edge_attr deben pasarse juntos o ambos omitirse."
+            )
+
+        if edge_index is None and edge_attr is None:
+            edge_index, edge_attr = self._build_graph_for_fit(X, y, coords)
+
         self.train()
         x_tensor, y_tensor, edge_index_tensor, edge_attr_tensor = self._prepare_tensors(
             X, y=y, edge_index=edge_index, edge_attr=edge_attr
@@ -371,16 +583,18 @@ class GraphAttentionGCN(BaseModel, nn.Module):
         self.is_fitted_ = True
         self.X_train_ = X
         self.y_train_ = np.asarray(y)
+        self.coords_train_ = np.asarray(coords)
+        self._cache_graph_state(X, y, coords)
         return self
 
     def tune_hyperparameters(
         self,
         X,
         y,
-        coords=None,
+        coords,
         *,
-        edge_index: np.ndarray,
-        edge_attr: np.ndarray,
+        edge_index: Optional[np.ndarray] = None,
+        edge_attr: Optional[np.ndarray] = None,
         X_val=None,
         y_val=None,
         val_edge_index: Optional[np.ndarray] = None,
@@ -405,6 +619,21 @@ class GraphAttentionGCN(BaseModel, nn.Module):
                 "dropout": [0.05, 0.10],
                 "lr": [1e-3, 5e-4],
             }
+
+        if coords is None:
+            raise ValueError(
+                "GraphAttentionGCN requiere `coords` en tune_hyperparameters(). "
+                "El tuning necesita mantener un flujo espacial coherente entre "
+                "fit() y predict()."
+            )
+
+        if (edge_index is None) != (edge_attr is None):
+            raise ValueError(
+                "edge_index y edge_attr deben pasarse juntos o ambos omitirse."
+            )
+
+        if edge_index is None and edge_attr is None:
+            edge_index, edge_attr = self._build_graph_for_fit(X, y, coords)
 
         if X_val is None:
             X_val = X
@@ -519,11 +748,18 @@ class GraphAttentionGCN(BaseModel, nn.Module):
                 loss_name=candidate_cfg["loss_name"],
                 huber_delta=candidate_cfg["huber_delta"],
                 grad_clip_norm=candidate_cfg["grad_clip_norm"],
+                k_neighbors=self.k_neighbors,
+                radius_km=self.radius_km,
+                bandwidth_km=self.bandwidth_km,
+                graph_distance=self.graph_distance,
+                add_reverse_edges=self.add_reverse_edges,
+                coord_feature_names=self.coord_feature_names,
             )
 
             candidate.fit(
                 X,
                 y,
+                coords,
                 edge_index=edge_index,
                 edge_attr=edge_attr,
                 epochs=epochs,
@@ -576,6 +812,7 @@ class GraphAttentionGCN(BaseModel, nn.Module):
             self.fit(
                 X,
                 y,
+                coords,
                 edge_index=edge_index,
                 edge_attr=edge_attr,
                 epochs=refit_epochs or epochs,
@@ -594,14 +831,41 @@ class GraphAttentionGCN(BaseModel, nn.Module):
         if not self.is_fitted_:
             raise RuntimeError("El modelo no está entrenado")
 
+        target_mask = None
+        X_eval = X
+
+        if edge_index is None or edge_attr is None:
+            if coords is not None:
+                if self._graph_state_ is None:
+                    raise ValueError(
+                        "predict() recibio coords pero el modelo no tiene estado "
+                        "de grafo cacheado de train. Reentrena pasando coords a "
+                        "fit(), o pasa edge_index/edge_attr explicitamente."
+                    )
+                X_eval, edge_index, edge_attr, target_mask = self._build_cross_graph_for_predict(
+                    X_target=X,
+                    coords_target=coords,
+                )
+            else:
+                x_tensor, _, edge_index_tensor, edge_attr_tensor = self._prepare_tensors(
+                    X, y=None, edge_index=edge_index, edge_attr=edge_attr
+                )
+                self.eval()
+                with torch.no_grad():
+                    preds = self.forward(x_tensor, edge_index_tensor, edge_attr_tensor)
+                return preds.cpu().numpy()
+
         x_tensor, _, edge_index_tensor, edge_attr_tensor = self._prepare_tensors(
-            X, y=None, edge_index=edge_index, edge_attr=edge_attr
+            X_eval, y=None, edge_index=edge_index, edge_attr=edge_attr
         )
 
         self.eval()
         with torch.no_grad():
             preds = self.forward(x_tensor, edge_index_tensor, edge_attr_tensor)
-        return preds.cpu().numpy()
+        preds_np = preds.cpu().numpy()
+        if target_mask is not None:
+            preds_np = preds_np[np.asarray(target_mask)]
+        return preds_np
 
 
 __all__ = ["GraphAttentionGCN", "GraphAttentionLayer"]

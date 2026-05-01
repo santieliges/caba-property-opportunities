@@ -56,6 +56,29 @@ class KNHS:
         c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
         return R * c
 
+    def _resolve_feature_cols(self, df: pd.DataFrame) -> list[str]:
+        if self.feature_cols is None:
+            return [c for c in df.columns if c not in {self.lat_col, self.lon_col}]
+        return list(self.feature_cols)
+
+    def _resolve_weights(
+        self,
+        df: pd.DataFrame,
+        feats: np.ndarray,
+        feature_cols: list[str],
+    ) -> np.ndarray | None:
+        if self.distance != "local_weighted":
+            return None
+
+        if self.weight_cols is not None and len(self.weight_cols) != len(feature_cols):
+            raise ValueError("weight_cols debe tener mismo largo que feature_cols")
+
+        if self.weight_cols is None:
+            # Fallback neutro: todos los features pesan igual.
+            return np.ones_like(feats, dtype=float)
+
+        return df[self.weight_cols].to_numpy(dtype=float)
+
     # --- API ---------------------------------------------------------
     def build(self, df: pd.DataFrame):
         """Genera edge_index y edge_attr a partir de un DataFrame.
@@ -67,23 +90,11 @@ class KNHS:
             edge_attr: np.ndarray shape (E, 2) con [dist_km, dist_feat].
         """
 
-        if self.feature_cols is None:
-            # todas excepto coord
-            self.feature_cols = [c for c in df.columns if c not in {self.lat_col, self.lon_col}]
-
-        if self.distance == "local_weighted":
-            if self.weight_cols is None:
-                raise ValueError("Para distance='local_weighted' debes indicar weight_cols")
-            if len(self.weight_cols) != len(self.feature_cols):
-                raise ValueError("weight_cols debe tener mismo largo que feature_cols")
+        feature_cols = self._resolve_feature_cols(df)
 
         coords = df[[self.lat_col, self.lon_col]].to_numpy(dtype=float)
-        feats = df[self.feature_cols].to_numpy(dtype=float)
-
-        if self.distance == "local_weighted":
-            weights = df[self.weight_cols].to_numpy(dtype=float)
-        else:
-            weights = None
+        feats = df[feature_cols].to_numpy(dtype=float)
+        weights = self._resolve_weights(df, feats, feature_cols)
 
         lat_rad = np.deg2rad(coords[:, 0])
         lon_rad = np.deg2rad(coords[:, 1])
@@ -129,6 +140,70 @@ class KNHS:
         edge_index = np.vstack([src_list, dst_list]).astype(np.int64)
         edge_attr = np.asarray(attr_list, dtype=np.float32)
         return edge_index, edge_attr
+
+    def build_cross_split(
+        self,
+        source_df: pd.DataFrame,
+        target_df: pd.DataFrame,
+    ):
+        """Construye un grafo combinado source+target con aristas source->target.
+
+        Se preservan las aristas internas de `source_df` generadas por `build()`.
+        Para cada nodo target, se buscan vecinos solo dentro de source según la
+        misma lógica KNHS y se agregan aristas source->target.
+
+        Returns:
+            combined_df, edge_index, edge_attr, target_mask
+        """
+
+        feature_cols = self._resolve_feature_cols(source_df)
+
+        edge_index_source, edge_attr_source = self.build(source_df)
+
+        coords_source = source_df[[self.lat_col, self.lon_col]].to_numpy(dtype=float)
+        coords_target = target_df[[self.lat_col, self.lon_col]].to_numpy(dtype=float)
+        feats_source = source_df[feature_cols].to_numpy(dtype=float)
+        feats_target = target_df[feature_cols].to_numpy(dtype=float)
+        weights_source = self._resolve_weights(source_df, feats_source, feature_cols)
+        weights_target = self._resolve_weights(target_df, feats_target, feature_cols)
+
+        lat_source = np.deg2rad(coords_source[:, 0])
+        lon_source = np.deg2rad(coords_source[:, 1])
+        lat_target = np.deg2rad(coords_target[:, 0])
+        lon_target = np.deg2rad(coords_target[:, 1])
+
+        src_list = [int(x) for x in edge_index_source[0]]
+        dst_list = [int(x) for x in edge_index_source[1]]
+        attr_list = edge_attr_source.tolist()
+
+        target_offset = len(source_df)
+        for i in range(len(target_df)):
+            d_km = self._haversine_km(lat_target[i], lon_target[i], lat_source, lon_source)
+            candidate_idx = np.nonzero(d_km <= self.radius_km)[0]
+            if len(candidate_idx) == 0:
+                continue
+
+            if self.distance == "euclidean":
+                feat_d = np.linalg.norm(feats_source[candidate_idx] - feats_target[i], axis=1)
+            else:
+                w_mean = 0.5 * (weights_source[candidate_idx] + weights_target[i])
+                diff = feats_source[candidate_idx] - feats_target[i]
+                feat_d = np.sqrt(np.sum(w_mean * diff * diff, axis=1))
+
+            top_k = np.argsort(feat_d)[: self.k]
+            neighbors = candidate_idx[top_k]
+            target_idx = target_offset + i
+            for j, dist_feat in zip(neighbors, feat_d[top_k]):
+                src_list.append(int(j))
+                dst_list.append(int(target_idx))
+                attr_list.append([float(d_km[j]), float(dist_feat)])
+
+        combined_df = pd.concat([source_df, target_df], ignore_index=True)
+        edge_index = np.vstack([src_list, dst_list]).astype(np.int64)
+        edge_attr = np.asarray(attr_list, dtype=np.float32)
+        target_mask = np.zeros(len(combined_df), dtype=bool)
+        target_mask[target_offset:] = True
+        return combined_df, edge_index, edge_attr, target_mask
 
 
 __all__ = ["KNHS"]

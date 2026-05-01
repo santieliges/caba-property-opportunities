@@ -2,7 +2,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from storage.storage import Storage
+from scraper_service.storage.storage import Storage
 
 
 class Synchronizer:

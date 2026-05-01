@@ -60,7 +60,12 @@ def parse_args() -> argparse.Namespace:
 RAW_DATA_DIR = Path("data/raw")
 PROCESSED_DATA_DIR = Path("data/processed")
 SPLITS_DATA_DIR = Path("data/splits")
-PIPELINE_PATH = Path("models/preprocessing_pipeline.joblib")
+PREPROCESSING_DIR = Path(__file__).resolve().parent
+PIPELINE_PATH = (
+    PREPROCESSING_DIR
+    / "artifacts"
+    / "preprocessing_pipeline.joblib"
+)
 
 
 def _save_processed_splits(

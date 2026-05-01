@@ -1,4 +1,5 @@
 from .baseModel import BaseModel
+from joblib import parallel_backend
 from pykrige.rk import RegressionKriging
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.inspection import permutation_importance
@@ -353,15 +354,19 @@ class RegressionKrigingModel(BaseModel):
                 scoring=scoring,
             )
 
-        result = permutation_importance(
-            estimator=self,
-            X=X_eval,
-            y=y_eval,
-            scoring=_permutation_scorer,
-            n_repeats=n_repeats,
-            random_state=random_state,
-            n_jobs=n_jobs,
-        )
+        # Con procesos, joblib intenta serializar el estimador completo y
+        # memmapear arrays grandes a disco temporal, lo que puede explotar
+        # en notebooks con datasets pesados. Con hilos evitamos pickling.
+        with parallel_backend("threading"):
+            result = permutation_importance(
+                estimator=self,
+                X=X_eval,
+                y=y_eval,
+                scoring=_permutation_scorer,
+                n_repeats=n_repeats,
+                random_state=random_state,
+                n_jobs=n_jobs,
+            )
 
         if as_frame:
             return pd.DataFrame(

@@ -8,8 +8,8 @@ from typing import Optional
 
 import requests
 
-from scrapper.Scrapper import BaseScrapper
-from scrapper.SosivaApiClient import (
+from scraper_service.scrapper.Scrapper import BaseScrapper
+from scraper_service.scrapper.SosivaApiClient import (
     SosivaApiClient,
     map_aviso_to_inmueble_fields,
     detect_pozo,

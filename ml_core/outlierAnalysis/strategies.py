@@ -55,6 +55,8 @@ class ZTestStrategy(Strategy):
 
         gdf_low_ext["tipo_valor_atipico"] = "BAJO"
         gdf_high_ext["tipo_valor_atipico"] = "ALTO"
+        gdf_low_ext["severidad_valor_atipico"] = "EXTREMO"
+        gdf_high_ext["severidad_valor_atipico"] = "EXTREMO"
 
         if z_outliers.get("borderline_outliers_idx") is None:
             z_df = pd.concat([gdf_low_ext, gdf_high_ext])
@@ -71,8 +73,6 @@ class ZTestStrategy(Strategy):
             gdf_low_mod["tipo_valor_atipico"] = "BAJO"
             gdf_high_mod["tipo_valor_atipico"] = "ALTO"
 
-            gdf_low_ext["severidad_valor_atipico"] = "EXTREMO"
-            gdf_high_ext["severidad_valor_atipico"] = "EXTREMO"
             gdf_low_mod["severidad_valor_atipico"] = "MODERADO"
             gdf_high_mod["severidad_valor_atipico"] = "MODERADO"
 
@@ -149,6 +149,7 @@ class CombinedZLisaStrategy(Strategy):
 
     def run(self, res, gdf, detector, w, coords, output_dir, model_name, params_for_method, **kwargs):
         alpha = params_for_method.get("alpha", 0.05)  # Nivel de significancia
+        permutations = params_for_method.get("permutations", 999)
 
         # 1. Z-test robusto y espacial (cola inferior)
         z_outliers = detector.z_test_outliers(
@@ -168,19 +169,32 @@ class CombinedZLisaStrategy(Strategy):
         lisa_results = detector.local_morans_I(
             y=res,
             w=w,
-            coords=coords
+            coords=coords,
+            permutations=permutations,
         )
-        p_values_lisa = lisa_results["p_sim"]
+        p_values_lisa = lisa_results.get("p_sim")
+        if p_values_lisa is None:
+            p_values_lisa = lisa_results.get("p_values")
+        if p_values_lisa is None:
+            raise ValueError(
+                "local_morans_I no devolvio p-values. "
+                "Verifica que permutations sea mayor a 0."
+            )
         quadrants = lisa_results["quadrant"]
 
         # 3. Score combinado
-        # Factor basado en cuadrante
+        # Priorizamos LH porque representa residuos bajos (propiedades
+        # baratas respecto a la prediccion) rodeados de vecinos con
+        # residuos altos, el patron de oportunidad que mas interesa.
         factor = np.zeros(len(quadrants))
-        factor[quadrants == "LL"] = 1
-        factor[(quadrants == "LH") | (quadrants == "HH")] = 0
+        factor[quadrants == "LH"] = 1.5
+        factor[quadrants == "LL"] = 0.5
+        factor[quadrants == "HH"] = 0
         factor[quadrants == "HL"] = -1
 
-        # Score = (1 - p_Z) + (1 - p_LISA) * factor
+        # Score = evidencia de residual bajo + ajuste espacial por cuadrante.
+        # LH recibe el mayor premio, LL un premio moderado, HH neutro y
+        # HL penalizacion.
         score = (1 - p_values_z) + (1 - p_values_lisa) * factor
 
         # Crear DataFrame con todos los valores

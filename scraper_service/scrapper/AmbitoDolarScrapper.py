@@ -1,6 +1,6 @@
 import re
 
-from scrapper.Scrapper import BaseScrapper
+from scraper_service.scrapper.Scrapper import BaseScrapper
 
 
 class AmbitoDolarScrapper(BaseScrapper):

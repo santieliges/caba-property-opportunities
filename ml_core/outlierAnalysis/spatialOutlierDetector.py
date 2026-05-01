@@ -207,6 +207,7 @@ class SpatialOutlierDetector:
                     pvals[i] = (np.sum(np.abs(sims) >= abs(I[i])) + 1) / (permutations + 1)
 
                 result["p_values"] = pvals
+                result["p_sim"] = pvals
 
             if return_coords and coords is not None:
                 coords = np.asarray(coords)

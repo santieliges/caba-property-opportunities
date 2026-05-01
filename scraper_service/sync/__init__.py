@@ -1,3 +1,3 @@
-from sync.sync import Synchronizer
+from .sync import Synchronizer
 
 __all__ = ["Synchronizer"]

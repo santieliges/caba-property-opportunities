@@ -1,3 +1,3 @@
-from routineJob.routineJob import RoutineJob
+from .routineJob import RoutineJob
 
 __all__ = ["RoutineJob"]

@@ -1,7 +1,7 @@
-from scrapper.AmbitoDolarScrapper import AmbitoDolarScrapper
-from scrapper.ArgenPropScrapper import ArgenPropScrapper, InmuebleData
-from scrapper.Scrapper import BaseScrapper
-from scrapper.SosivaApiClient import SosivaApiClient
+from .AmbitoDolarScrapper import AmbitoDolarScrapper
+from .ArgenPropScrapper import ArgenPropScrapper, InmuebleData
+from .Scrapper import BaseScrapper
+from .SosivaApiClient import SosivaApiClient
 
 __all__ = [
     "AmbitoDolarScrapper",
