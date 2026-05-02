@@ -8,13 +8,16 @@ features. Se generan aristas `i -> j` (y opcionalmente la inversa) con
 atributos [distancia_km, distancia_feature].
 
 El resultado es un par `(edge_index, edge_attr)` listo para consumirse por los
-modelos GAT/GCN de este proyecto.
+modelos GAT/GCN de este proyecto. Opcionalmente la clase puede ajustar y
+reutilizar un scaler propio para `edge_attr`, de forma de escalar train una
+sola vez y aplicar exactamente la misma transformación en validación/predicción.
 """
 
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from sklearn.preprocessing import StandardScaler
 
 
 class KNHS:
@@ -28,6 +31,7 @@ class KNHS:
         k: int = 5,
         distance: str = "euclidean",  # "euclidean" | "local_weighted"
         add_reverse: bool = True,
+        scale_edge_features: bool = True,
     ):
         if radius_km <= 0:
             raise ValueError("radius_km debe ser > 0")
@@ -44,6 +48,9 @@ class KNHS:
         self.k = k
         self.distance = distance
         self.add_reverse = add_reverse
+        self.scale_edge_features = scale_edge_features
+        self.edge_scaler_ = StandardScaler() if scale_edge_features else None
+        self.edge_scaler_fitted_ = False
 
     # --- helpers -----------------------------------------------------
     @staticmethod
@@ -79,16 +86,63 @@ class KNHS:
 
         return df[self.weight_cols].to_numpy(dtype=float)
 
-    # --- API ---------------------------------------------------------
-    def build(self, df: pd.DataFrame):
-        """Genera edge_index y edge_attr a partir de un DataFrame.
+    def fit_edge_scaler(self, edge_attr: np.ndarray):
+        """Ajusta el scaler de aristas usando solo aristas de train."""
 
-        Args:
-            df: DataFrame con columnas de coordenadas y features.
-        Returns:
-            edge_index: np.ndarray shape (2, E) con pares (src, dst).
-            edge_attr: np.ndarray shape (E, 2) con [dist_km, dist_feat].
-        """
+        edge_attr_arr = np.asarray(edge_attr, dtype=float)
+        if edge_attr_arr.ndim != 2:
+            raise ValueError(
+                "edge_attr debe tener shape (E, edge_dim) para ajustar el scaler. "
+                f"Recibido: {edge_attr_arr.shape}."
+            )
+        if edge_attr_arr.shape[0] == 0:
+            raise ValueError("No se puede ajustar el scaler de aristas con 0 aristas.")
+        if not self.scale_edge_features:
+            return self
+
+        self.edge_scaler_.fit(edge_attr_arr)
+        self.edge_scaler_fitted_ = True
+        return self
+
+    def transform_edge_attr(self, edge_attr: np.ndarray) -> np.ndarray:
+        """Transforma edge_attr con el scaler ya ajustado."""
+
+        edge_attr_arr = np.asarray(edge_attr, dtype=float)
+        if edge_attr_arr.ndim != 2:
+            raise ValueError(
+                "edge_attr debe tener shape (E, edge_dim) para transformar aristas. "
+                f"Recibido: {edge_attr_arr.shape}."
+            )
+        if edge_attr_arr.shape[0] == 0:
+            return edge_attr_arr.astype(np.float32, copy=False)
+        if not self.scale_edge_features:
+            return edge_attr_arr.astype(np.float32, copy=False)
+        if not self.edge_scaler_fitted_:
+            raise ValueError(
+                "El scaler de aristas no está ajustado. "
+                "Llama antes a fit_edge_scaler() o usa build(..., fit_edge_scaler=True)."
+            )
+
+        return self.edge_scaler_.transform(edge_attr_arr).astype(np.float32, copy=False)
+
+    def _maybe_scale_edge_attr(
+        self,
+        edge_attr: np.ndarray,
+        *,
+        fit_edge_scaler: bool = False,
+        scale_edge_attr: bool = True,
+    ) -> np.ndarray:
+        edge_attr_arr = np.asarray(edge_attr, dtype=float)
+        if not scale_edge_attr:
+            return edge_attr_arr.astype(np.float32, copy=False)
+        if fit_edge_scaler:
+            self.fit_edge_scaler(edge_attr_arr)
+        if self.scale_edge_features and self.edge_scaler_fitted_:
+            return self.transform_edge_attr(edge_attr_arr)
+        return edge_attr_arr.astype(np.float32, copy=False)
+
+    def _build_raw(self, df: pd.DataFrame):
+        """Genera edge_index y edge_attr sin escalar."""
 
         feature_cols = self._resolve_feature_cols(df)
 
@@ -141,10 +195,37 @@ class KNHS:
         edge_attr = np.asarray(attr_list, dtype=np.float32)
         return edge_index, edge_attr
 
+    # --- API ---------------------------------------------------------
+    def build(
+        self,
+        df: pd.DataFrame,
+        *,
+        fit_edge_scaler: bool = False,
+        scale_edge_attr: bool = True,
+    ):
+        """Genera edge_index y edge_attr a partir de un DataFrame.
+
+        Args:
+            df: DataFrame con columnas de coordenadas y features.
+        Returns:
+            edge_index: np.ndarray shape (2, E) con pares (src, dst).
+            edge_attr: np.ndarray shape (E, 2) con [dist_km, dist_feat].
+        """
+        edge_index, edge_attr = self._build_raw(df)
+        edge_attr = self._maybe_scale_edge_attr(
+            edge_attr,
+            fit_edge_scaler=fit_edge_scaler,
+            scale_edge_attr=scale_edge_attr,
+        )
+        return edge_index, edge_attr
+
     def build_cross_split(
         self,
         source_df: pd.DataFrame,
         target_df: pd.DataFrame,
+        *,
+        fit_edge_scaler_on_source: bool = False,
+        scale_edge_attr: bool = True,
     ):
         """Construye un grafo combinado source+target con aristas source->target.
 
@@ -158,7 +239,7 @@ class KNHS:
 
         feature_cols = self._resolve_feature_cols(source_df)
 
-        edge_index_source, edge_attr_source = self.build(source_df)
+        edge_index_source, edge_attr_source = self._build_raw(source_df)
 
         coords_source = source_df[[self.lat_col, self.lon_col]].to_numpy(dtype=float)
         coords_target = target_df[[self.lat_col, self.lon_col]].to_numpy(dtype=float)
@@ -201,6 +282,13 @@ class KNHS:
         combined_df = pd.concat([source_df, target_df], ignore_index=True)
         edge_index = np.vstack([src_list, dst_list]).astype(np.int64)
         edge_attr = np.asarray(attr_list, dtype=np.float32)
+        if fit_edge_scaler_on_source:
+            self.fit_edge_scaler(edge_attr_source)
+        edge_attr = self._maybe_scale_edge_attr(
+            edge_attr,
+            fit_edge_scaler=False,
+            scale_edge_attr=scale_edge_attr,
+        )
         target_mask = np.zeros(len(combined_df), dtype=bool)
         target_mask[target_offset:] = True
         return combined_df, edge_index, edge_attr, target_mask

@@ -118,6 +118,7 @@ def build_feature_engineering_pipeline():
                 "cocheras",
                 "antiguedad",
                 "expensas",
+                "estado_num",
                 'dist_subte',
                 'dist_universidad',
                 'dist_hospital',

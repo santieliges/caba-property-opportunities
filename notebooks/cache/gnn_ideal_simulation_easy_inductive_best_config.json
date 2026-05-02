@@ -1,0 +1,40 @@
+{
+  "model_class": "GraphAttentionGCN",
+  "saved_at_utc": "2026-05-02T19:21:51.942423+00:00",
+  "best_params_": {
+    "hidden": 64,
+    "num_layers": 1,
+    "num_heads": 4,
+    "dropout": 0.05,
+    "lr": 0.001,
+    "weight_decay": 0.0,
+    "loss_name": "huber",
+    "huber_delta": 0.5,
+    "grad_clip_norm": null
+  },
+  "target": "log_precio",
+  "features": [
+    "x1",
+    "x2",
+    "x3",
+    "x4",
+    "binaria"
+  ],
+  "simulation_config": {
+    "scenario_name": "easy_neighbor_average",
+    "train_n": 1200,
+    "val_n": 400,
+    "test_n": 400,
+    "graph_k": 8,
+    "graph_radius_km": 2.5,
+    "noise_std": 0.02,
+    "node_weight": 0.1,
+    "neighbor_weight": 1.35
+  },
+  "graph_params": {
+    "k_neighbors": 8,
+    "radius_km": 2.5,
+    "graph_distance": "euclidean"
+  },
+  "simulation_protocol": "inductive_train_to_target"
+}

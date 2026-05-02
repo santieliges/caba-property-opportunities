@@ -1,4 +1,5 @@
 import math
+from copy import deepcopy
 from itertools import product
 from typing import Iterable, Optional, Sequence, Tuple
 
@@ -79,14 +80,8 @@ class GraphAttentionLayer(nn.Module):
         self.W_v = nn.Linear(in_dim, self.out_dim, bias=False)
         self.W_u = nn.Linear(edge_dim, self.out_dim, bias=False)
 
-        # Bias term modulating attention with edge attributes
-        self.edge_bias = nn.Linear(edge_dim, self.num_heads, bias=False)
-
-        # Projects original features into hidden space for the gated residual
-        self.skip_proj = nn.Linear(in_dim, self.out_dim)
-
-        # Gate controls how much of the aggregated message is mixed with the skip
-        self.gate = nn.Linear(self.out_dim * 2, self.out_dim)
+        # Final aggregation matches the paper: linear_aggr([h_i, h_hat_i])
+        self.linear_aggr = nn.Linear(in_dim + self.out_dim, self.out_dim)
 
         self.activation = activation or nn.ReLU()
         self.dropout = nn.Dropout(dropout)
@@ -103,9 +98,8 @@ class GraphAttentionLayer(nn.Module):
         k_src = k[src]
         v_src = v[src]
 
-        # Attention logits with edge trans (U) + optional bias per cabeza
+        # Attention logits following the paper: Q_i · (K_j + U_ij)
         att_logits = (q_dst * (k_src + u)).sum(dim=-1) / math.sqrt(self.head_dim)
-        att_logits = att_logits + self.edge_bias(edge_attr)  # [E, H]
 
         alphas = _SegmentOps.softmax_per_dst(att_logits, dst, x.size(0))  # [E, H]
 
@@ -115,11 +109,7 @@ class GraphAttentionLayer(nn.Module):
         agg = agg.view(x.size(0), self.num_heads, self.head_dim)
 
         agg_flat = agg.view(x.size(0), self.out_dim)
-        skip = self.skip_proj(x)
-
-        # Gated fusion between aggregated message and skip connection
-        gate = torch.sigmoid(self.gate(torch.cat([agg_flat, skip], dim=-1)))
-        h_next = gate * agg_flat + (1 - gate) * skip
+        h_next = self.linear_aggr(torch.cat([x, agg_flat], dim=-1))
         h_next = self.activation(self.dropout(h_next))
         return h_next
 
@@ -130,7 +120,9 @@ class GraphAttentionGCN(BaseModel, nn.Module):
     El flujo esperado del modelo es espacial: `coords` debe pasarse en `fit()`
     para que el modelo pueda cachear el estado del grafo de train y luego
     construir grafos cross-split en `predict()`. Si además se proveen
-    `edge_index` y `edge_attr`, esos grafos manuales tienen prioridad.
+    `edge_index` y `edge_attr`, esos grafos manuales tienen prioridad. Cuando
+    se pasa `knhs_builder`, ese objeto se usa como plantilla para construir y
+    fittear internamente el grafo de train, incluyendo el scaler de aristas.
     """
 
     def __init__(
@@ -155,6 +147,7 @@ class GraphAttentionGCN(BaseModel, nn.Module):
         graph_distance: str = "euclidean",
         add_reverse_edges: bool = True,
         coord_feature_names: Sequence[str] = ("longitud", "latitud"),
+        knhs_builder: Optional[KNHS] = None,
     ):
         BaseModel.__init__(self)
         nn.Module.__init__(self)
@@ -180,6 +173,12 @@ class GraphAttentionGCN(BaseModel, nn.Module):
         self.add_reverse_edges = add_reverse_edges
         self.coord_feature_names = tuple(coord_feature_names)
         self.weight_cols_ = [f"w_{col}" for col in self.feature_names_]
+        self.knhs_builder_template = deepcopy(knhs_builder) if knhs_builder is not None else None
+        if self.knhs_builder_template is not None:
+            self.k_neighbors = int(self.knhs_builder_template.k)
+            self.radius_km = float(self.knhs_builder_template.radius_km)
+            self.graph_distance = str(self.knhs_builder_template.distance)
+            self.add_reverse_edges = bool(self.knhs_builder_template.add_reverse)
 
         self._build_network()
 
@@ -189,6 +188,8 @@ class GraphAttentionGCN(BaseModel, nn.Module):
         self.tuning_results_ = None
         self.coords_train_ = None
         self._graph_state_ = None
+        self.knhs_builder_ = None
+        self.history_ = None
 
     @staticmethod
     def _smape(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -321,7 +322,8 @@ class GraphAttentionGCN(BaseModel, nn.Module):
                     "combinado correspondiente al hacer predict/tuning."
                 )
 
-        x_tensor = torch.as_tensor(np.asarray(X[self.feature_names_].values), dtype=torch.float32, device=self.device)
+        x_array = X[self.feature_names_].to_numpy(dtype=np.float32, copy=False)
+        x_tensor = torch.as_tensor(x_array, dtype=torch.float32, device=self.device)
         edge_index_tensor = torch.as_tensor(edge_index, dtype=torch.long, device=self.device)
         edge_attr_tensor = torch.as_tensor(edge_attr, dtype=torch.float32, device=self.device)
 
@@ -436,16 +438,31 @@ class GraphAttentionGCN(BaseModel, nn.Module):
         return graph
 
     def _build_knhs_builder(self) -> KNHS:
-        return KNHS(
-            lat_col="lat_deg",
-            lon_col="lon_deg",
-            feature_cols=self.feature_names_,
-            weight_cols=self.weight_cols_ if self.graph_distance == "local_weighted" else None,
-            distance=self.graph_distance,
-            radius_km=self.radius_km,
-            k=self.k_neighbors,
-            add_reverse=self.add_reverse_edges,
-        )
+        if self.knhs_builder_template is None:
+            builder = KNHS(
+                lat_col="lat_deg",
+                lon_col="lon_deg",
+                feature_cols=self.feature_names_,
+                weight_cols=self.weight_cols_ if self.graph_distance == "local_weighted" else None,
+                distance=self.graph_distance,
+                radius_km=self.radius_km,
+                k=self.k_neighbors,
+                add_reverse=self.add_reverse_edges,
+            )
+        else:
+            builder = deepcopy(self.knhs_builder_template)
+            builder.lat_col = "lat_deg"
+            builder.lon_col = "lon_deg"
+            builder.feature_cols = list(self.feature_names_)
+            builder.weight_cols = self.weight_cols_ if self.graph_distance == "local_weighted" else None
+            builder.distance = self.graph_distance
+            builder.radius_km = self.radius_km
+            builder.k = self.k_neighbors
+            builder.add_reverse = self.add_reverse_edges
+            if builder.scale_edge_features and builder.edge_scaler_ is not None:
+                builder.edge_scaler_ = deepcopy(builder.edge_scaler_)
+            builder.edge_scaler_fitted_ = False
+        return builder
 
     def _cache_graph_state(self, X, y, coords) -> None:
         coords_train_latlon_rad = self._coords_to_latlon_radians(coords)
@@ -461,11 +478,15 @@ class GraphAttentionGCN(BaseModel, nn.Module):
             coords_train_latlon_rad,
             weights_train,
         )
+        builder = self._build_knhs_builder()
+        # Ajustamos el scaler de aristas solo con train para reutilizarlo en predict().
+        builder.build(graph_train, fit_edge_scaler=True)
+        self.knhs_builder_ = builder
         self._graph_state_ = {
             "coords_train_latlon_rad": coords_train_latlon_rad,
             "weights_train": weights_train,
             "graph_train": graph_train,
-            "builder": self._build_knhs_builder(),
+            "builder": builder,
         }
 
     def _build_cross_graph_for_predict(self, X_target, coords_target):
@@ -510,7 +531,7 @@ class GraphAttentionGCN(BaseModel, nn.Module):
             weights,
         )
         builder = self._build_knhs_builder()
-        edge_index, edge_attr = builder.build(graph)
+        edge_index, edge_attr = builder.build(graph, fit_edge_scaler=True)
         return edge_index, edge_attr
 
     # --- core forward ---------------------------------------------------
@@ -543,8 +564,14 @@ class GraphAttentionGCN(BaseModel, nn.Module):
                 "edge_index y edge_attr deben pasarse juntos o ambos omitirse."
             )
 
+        self._cache_graph_state(X, y, coords)
+        graph_builder = self._graph_state_["builder"]
+        graph_train = self._graph_state_["graph_train"]
+
         if edge_index is None and edge_attr is None:
-            edge_index, edge_attr = self._build_graph_for_fit(X, y, coords)
+            edge_index, edge_attr = graph_builder.build(graph_train)
+        else:
+            edge_attr = graph_builder.transform_edge_attr(edge_attr)
 
         self.train()
         x_tensor, y_tensor, edge_index_tensor, edge_attr_tensor = self._prepare_tensors(
@@ -559,6 +586,12 @@ class GraphAttentionGCN(BaseModel, nn.Module):
 
         best_loss = float("inf")
         patience_left = self.patience
+        self.history_ = {
+            "epoch": [],
+            "loss": [],
+            "best_loss": [],
+            "patience_left": [],
+        }
 
         for epoch in range(epochs):
             optimizer.zero_grad()
@@ -576,6 +609,11 @@ class GraphAttentionGCN(BaseModel, nn.Module):
             else:
                 patience_left -= 1
 
+            self.history_["epoch"].append(epoch + 1)
+            self.history_["loss"].append(float(current_loss))
+            self.history_["best_loss"].append(float(best_loss))
+            self.history_["patience_left"].append(int(patience_left))
+
             if patience_left <= 0:
                 print(f"Early stopping en epoch {epoch + 1}, best loss={best_loss:.6f}")
                 break
@@ -584,7 +622,6 @@ class GraphAttentionGCN(BaseModel, nn.Module):
         self.X_train_ = X
         self.y_train_ = np.asarray(y)
         self.coords_train_ = np.asarray(coords)
-        self._cache_graph_state(X, y, coords)
         return self
 
     def tune_hyperparameters(
@@ -597,6 +634,7 @@ class GraphAttentionGCN(BaseModel, nn.Module):
         edge_attr: Optional[np.ndarray] = None,
         X_val=None,
         y_val=None,
+        coords_val=None,
         val_edge_index: Optional[np.ndarray] = None,
         val_edge_attr: Optional[np.ndarray] = None,
         param_grid: Optional[dict] = None,
@@ -632,17 +670,28 @@ class GraphAttentionGCN(BaseModel, nn.Module):
                 "edge_index y edge_attr deben pasarse juntos o ambos omitirse."
             )
 
-        if edge_index is None and edge_attr is None:
-            edge_index, edge_attr = self._build_graph_for_fit(X, y, coords)
+        train_graph_is_explicit = edge_index is not None and edge_attr is not None
 
         if X_val is None:
             X_val = X
         if y_val is None:
             y_val = y
-        if val_edge_index is None:
-            val_edge_index = edge_index
-        if val_edge_attr is None:
-            val_edge_attr = edge_attr
+        if coords_val is None and X_val is X:
+            coords_val = coords
+        if (val_edge_index is None) != (val_edge_attr is None):
+            raise ValueError(
+                "val_edge_index y val_edge_attr deben pasarse juntos o ambos omitirse."
+            )
+        if (
+            val_edge_index is None
+            and val_edge_attr is None
+            and X_val is not X
+            and coords_val is None
+        ):
+            raise ValueError(
+                "Si X_val es distinto de X, pasá coords_val o val_edge_index/val_edge_attr "
+                "para que el modelo pueda evaluar sobre el split de validación."
+            )
 
         grid_keys = list(param_grid.keys())
         grid_values = [param_grid[key] for key in grid_keys]
@@ -684,29 +733,6 @@ class GraphAttentionGCN(BaseModel, nn.Module):
                 f"(search_type={search_type}, total_grid={len(all_configs)})."
             )
 
-        val_edge_index_arr = np.asarray(val_edge_index)
-        val_uses_combined_graph = (
-            val_edge_index_arr.size > 0 and int(val_edge_index_arr.max()) >= len(X_val)
-        )
-        if val_uses_combined_graph:
-            expected_nodes = len(X) + len(X_val)
-            max_idx = int(val_edge_index_arr.max())
-            if max_idx >= expected_nodes:
-                raise ValueError(
-                    "val_edge_index referencia más nodos que los disponibles en train+val. "
-                    f"Máximo índice recibido: {max_idx}, nodos esperados: {expected_nodes}."
-                )
-            X_val_eval = self._concat_frames(X, X_val)
-            val_target_slice = slice(len(X), expected_nodes)
-            if verbose:
-                print(
-                    "Detectado grafo de validación cross-split; la evaluación usará "
-                    "el grafo combinado train+val y luego recortará solo los nodos target."
-                )
-        else:
-            X_val_eval = X_val
-            val_target_slice = slice(None)
-
         for cfg in configs_to_run:
             hidden = int(cfg.get("hidden", self.hidden))
             num_heads = int(cfg.get("num_heads", self.num_heads))
@@ -733,44 +759,86 @@ class GraphAttentionGCN(BaseModel, nn.Module):
             if verbose:
                 print(f"Entrenando config {candidate_cfg}")
 
-            candidate = GraphAttentionGCN(
-                feature_names=self.feature_names_,
-                edge_dim=self.edge_dim,
-                hidden=candidate_cfg["hidden"],
-                num_layers=candidate_cfg["num_layers"],
-                num_heads=candidate_cfg["num_heads"],
-                dropout=candidate_cfg["dropout"],
-                lr=candidate_cfg["lr"],
-                weight_decay=candidate_cfg["weight_decay"],
-                device=str(self.device),
-                patience=self.patience,
-                min_delta=self.min_delta,
-                loss_name=candidate_cfg["loss_name"],
-                huber_delta=candidate_cfg["huber_delta"],
-                grad_clip_norm=candidate_cfg["grad_clip_norm"],
-                k_neighbors=self.k_neighbors,
-                radius_km=self.radius_km,
-                bandwidth_km=self.bandwidth_km,
-                graph_distance=self.graph_distance,
-                add_reverse_edges=self.add_reverse_edges,
-                coord_feature_names=self.coord_feature_names,
-            )
+            candidate = None
+            try:
+                candidate = GraphAttentionGCN(
+                    feature_names=self.feature_names_,
+                    edge_dim=self.edge_dim,
+                    hidden=candidate_cfg["hidden"],
+                    num_layers=candidate_cfg["num_layers"],
+                    num_heads=candidate_cfg["num_heads"],
+                    dropout=candidate_cfg["dropout"],
+                    lr=candidate_cfg["lr"],
+                    weight_decay=candidate_cfg["weight_decay"],
+                    device=str(self.device),
+                    patience=self.patience,
+                    min_delta=self.min_delta,
+                    loss_name=candidate_cfg["loss_name"],
+                    huber_delta=candidate_cfg["huber_delta"],
+                    grad_clip_norm=candidate_cfg["grad_clip_norm"],
+                    k_neighbors=self.k_neighbors,
+                    radius_km=self.radius_km,
+                    bandwidth_km=self.bandwidth_km,
+                    graph_distance=self.graph_distance,
+                    add_reverse_edges=self.add_reverse_edges,
+                    coord_feature_names=self.coord_feature_names,
+                    knhs_builder=self.knhs_builder_template,
+                )
 
-            candidate.fit(
-                X,
-                y,
-                coords,
-                edge_index=edge_index,
-                edge_attr=edge_attr,
-                epochs=epochs,
-            )
+                fit_kwargs = {
+                    "epochs": epochs,
+                }
+                if train_graph_is_explicit:
+                    fit_kwargs["edge_index"] = edge_index
+                    fit_kwargs["edge_attr"] = edge_attr
 
-            preds = candidate.predict(
-                X_val_eval,
-                edge_index=val_edge_index,
-                edge_attr=val_edge_attr,
-            )
-            preds = np.asarray(preds).reshape(-1)[val_target_slice]
+                candidate.fit(
+                    X,
+                    y,
+                    coords,
+                    **fit_kwargs,
+                )
+
+                predict_kwargs = {}
+                X_val_eval = X_val
+                val_target_slice = slice(None)
+
+                if val_edge_index is not None and val_edge_attr is not None:
+                    val_edge_index_arr = np.asarray(val_edge_index)
+                    val_uses_combined_graph = (
+                        val_edge_index_arr.size > 0 and int(val_edge_index_arr.max()) >= len(X_val)
+                    )
+                    if val_uses_combined_graph:
+                        expected_nodes = len(X) + len(X_val)
+                        max_idx = int(val_edge_index_arr.max())
+                        if max_idx >= expected_nodes:
+                            raise ValueError(
+                                "val_edge_index referencia más nodos que los disponibles en train+val. "
+                                f"Máximo índice recibido: {max_idx}, nodos esperados: {expected_nodes}."
+                            )
+                        X_val_eval = self._concat_frames(X, X_val)
+                        val_target_slice = slice(len(X), expected_nodes)
+                        if verbose:
+                            print(
+                                "Detectado grafo de validación cross-split explícito; la evaluación usará "
+                                "el grafo combinado train+val y luego recortará solo los nodos target."
+                            )
+
+                    predict_kwargs["edge_index"] = val_edge_index
+                    predict_kwargs["edge_attr"] = val_edge_attr
+                elif coords_val is not None:
+                    predict_kwargs["coords"] = coords_val
+
+                preds = candidate.predict(
+                    X_val_eval,
+                    **predict_kwargs,
+                )
+                preds = np.asarray(preds).reshape(-1)[val_target_slice]
+            finally:
+                if candidate is not None:
+                    del candidate
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
             y_true_eval = np.asarray(y_val).reshape(-1)
             y_pred_eval = np.asarray(preds).reshape(-1)
@@ -809,13 +877,18 @@ class GraphAttentionGCN(BaseModel, nn.Module):
         if refit:
             self._apply_config(best_config)
             self._set_random_state(random_state)
+            fit_kwargs = {
+                "epochs": refit_epochs or epochs,
+            }
+            if train_graph_is_explicit:
+                fit_kwargs["edge_index"] = edge_index
+                fit_kwargs["edge_attr"] = edge_attr
+
             self.fit(
                 X,
                 y,
                 coords,
-                edge_index=edge_index,
-                edge_attr=edge_attr,
-                epochs=refit_epochs or epochs,
+                **fit_kwargs,
             )
 
         return self
@@ -854,6 +927,8 @@ class GraphAttentionGCN(BaseModel, nn.Module):
                 with torch.no_grad():
                     preds = self.forward(x_tensor, edge_index_tensor, edge_attr_tensor)
                 return preds.cpu().numpy()
+        elif self._graph_state_ is not None:
+            edge_attr = self._graph_state_["builder"].transform_edge_attr(edge_attr)
 
         x_tensor, _, edge_index_tensor, edge_attr_tensor = self._prepare_tensors(
             X_eval, y=None, edge_index=edge_index, edge_attr=edge_attr

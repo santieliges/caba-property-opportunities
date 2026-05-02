@@ -1,8 +1,8 @@
 {
   "model_class": "GraphAttentionGCN",
-  "saved_at_utc": "2026-05-01T04:03:06.724439+00:00",
+  "saved_at_utc": "2026-05-02T00:58:49.086093+00:00",
   "best_params_": {
-    "hidden": 128,
+    "hidden": 96,
     "num_layers": 3,
     "num_heads": 2,
     "dropout": 0.45,
@@ -10,7 +10,7 @@
     "weight_decay": 0.001,
     "loss_name": "huber",
     "huber_delta": 0.3,
-    "grad_clip_norm": 7.0
+    "grad_clip_norm": 1.0
   },
   "target": "log_precio",
   "features": [
@@ -39,6 +39,6 @@
   "graph_params": {
     "k_neighbors": 15,
     "radius_km": 3.0,
-    "bandwidth_km": 2.0
+    "graph_distance": "euclidean"
   }
 }

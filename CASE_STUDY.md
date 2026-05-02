@@ -65,6 +65,7 @@ Artefacto principal:
 
 - El valor espacial agrega informacion util mas alla de las features del inmueble.
 - La deteccion por residuos permite pasar de un problema de prediccion a un caso de uso mas accionable.
+- La estrategia que comiba Z + LISA parece mostrar buenas oportunidades filtrando falsos positivos, pero probablemente este dejando pasar otras oportunidades buenas.
 - Los modelos espaciales clasicos aportaron intuicion, pero no mantuvieron el mismo nivel de escalabilidad al crecer el problema.
 - El flujo mas solido hoy combina pipeline de datos historicos, predictor tabular fuerte y diagnostico espacial sobre residuos.
 
