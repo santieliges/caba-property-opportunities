@@ -1,12 +1,16 @@
 from pathlib import Path
+import re
 import sys
+
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scrapper.SosivaApiClient import SosivaApiClient, map_aviso_to_inmueble_fields
-from scrapper.SosivaApiClient import detect_pozo
-import re
+from scraper_service.scraper.SosivaApiClient import (
+    SosivaApiClient,
+    detect_pozo,
+    map_aviso_to_inmueble_fields,
+)
 
 def test_detect_pozo_with_direct_keyword():
     aviso = {"InformacionAdicional_t": "Departamento de 2 ambientes en pozo con entrega estimada para 2027."}

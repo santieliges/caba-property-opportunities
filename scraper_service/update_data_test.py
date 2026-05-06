@@ -2,12 +2,15 @@ import asyncio
 import logging
 import os
 from pathlib import Path
+import sys
 
-from routineJob.routineJob import RoutineJob
-from scrapper.ArgenPropScrapper import ArgenPropScrapper
-from storage.storage import CSVStorage
-from sync.sync import Synchronizer
-from updater.updater import Updater
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scraper_service.routine_job.routine_job import RoutineJob
+from scraper_service.scraper.argenprop_scraper import ArgenPropScraper
+from scraper_service.storage.storage import CSVStorage
+from scraper_service.sync.sync import Synchronizer
+from scraper_service.updater.updater import Updater
 
 logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -42,7 +45,7 @@ async def run_argenprop_job(
     logger.info("Iniciando job ArgenProp. csv_path=%s", csv_path)
     storage = CSVStorage(csv_path)
     sync = Synchronizer(storage=storage)
-    scrapper = ArgenPropScrapper(
+    scraper = ArgenPropScraper(
         headless=env_flag("HEADLESS", True),
         url_base=url_base,
         download_images=False,
@@ -50,7 +53,7 @@ async def run_argenprop_job(
 
     job = RoutineJob(
         storage=storage,
-        scrapper=scrapper,
+        scraper=scraper,
         updater=updater,
         synchronizer=sync,
     )

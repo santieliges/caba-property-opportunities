@@ -1,8 +1,12 @@
 import argparse
-import os
 import json
+import os
+from pathlib import Path
+import sys
 
-from scrapper.SosivaApiClient import (
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from scraper_service.scraper.SosivaApiClient import (
     SosivaApiClient,
     load_headers_from_json,
 )

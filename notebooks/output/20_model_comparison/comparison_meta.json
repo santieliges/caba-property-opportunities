@@ -1,0 +1,9 @@
+{
+  "models_registered": [
+    "lgwr",
+    "sar",
+    "rf_kriging",
+    "gnn"
+  ],
+  "models_available": []
+}

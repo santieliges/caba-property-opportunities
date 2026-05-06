@@ -21,13 +21,13 @@ def _optional_imports() -> None:
         __all__.append("RentalPriceGNN")
 
     try:
-        from .gat_gcn_model import GraphAttentionGCN, GraphAttentionLayer
+        from .tgnn import TGNN, GraphAttentionLayer
     except Exception:
         pass
     else:
-        globals()["GraphAttentionGCN"] = GraphAttentionGCN
+        globals()["TGNN"] = TGNN
         globals()["GraphAttentionLayer"] = GraphAttentionLayer
-        __all__.extend(["GraphAttentionGCN", "GraphAttentionLayer"])
+        __all__.extend(["TGNN", "GraphAttentionLayer"])
 
 
 _optional_imports()

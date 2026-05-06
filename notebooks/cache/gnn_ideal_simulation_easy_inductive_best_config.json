@@ -1,13 +1,13 @@
 {
-  "model_class": "GraphAttentionGCN",
-  "saved_at_utc": "2026-05-02T19:21:51.942423+00:00",
+  "model_class": "TGNN",
+  "saved_at_utc": "2026-05-05T02:58:25.466776+00:00",
   "best_params_": {
     "hidden": 64,
-    "num_layers": 1,
-    "num_heads": 4,
+    "num_layers": 2,
+    "num_heads": 8,
     "dropout": 0.05,
     "lr": 0.001,
-    "weight_decay": 0.0,
+    "weight_decay": 1e-06,
     "loss_name": "huber",
     "huber_delta": 0.5,
     "grad_clip_norm": null

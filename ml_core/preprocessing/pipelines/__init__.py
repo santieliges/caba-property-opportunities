@@ -1,6 +1,6 @@
-from .cleaningDataPipeline import build_cleaning_pipeline
-from .featureEngeneeringPipeline import build_feature_engineering_pipeline
-from .preprocessingPipeline import build_preprocessing_pipeline
+from .cleaning_data_pipeline import build_cleaning_pipeline
+from .feature_engineering_pipeline import build_feature_engineering_pipeline
+from .preprocessing_pipeline import build_preprocessing_pipeline
 
 __all__ = [
     "build_cleaning_pipeline",

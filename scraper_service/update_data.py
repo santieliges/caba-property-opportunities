@@ -3,8 +3,8 @@ import logging
 import os
 from pathlib import Path
 
-from scraper_service.routineJob.routineJob import RoutineJob
-from scraper_service.scrapper.ArgenPropScrapper import ArgenPropScrapper
+from scraper_service.routine_job.routine_job import RoutineJob
+from scraper_service.scraper.argenprop_scraper import ArgenPropScraper
 from scraper_service.storage.storage import CSVStorage
 from scraper_service.sync.sync import Synchronizer
 from scraper_service.updater.updater import Updater
@@ -41,7 +41,7 @@ async def run_argenprop_job(
     logger.info("Iniciando job ArgenProp. csv_path=%s", csv_path)
     storage = CSVStorage(csv_path)
     sync = Synchronizer(storage=storage)
-    scrapper = ArgenPropScrapper(
+    scraper = ArgenPropScraper(
         headless=env_flag("HEADLESS", True),
         url_base=url_base,
         download_images=False,
@@ -49,12 +49,16 @@ async def run_argenprop_job(
 
     job = RoutineJob(
         storage=storage,
-        scrapper=scrapper,
+        scraper=scraper,
         updater=updater,
         synchronizer=sync,
     )
 
-    result = await job.fetch_and_sync_data(batch_size=100, delay_s=delay_s, jitter_s=jitter_s)
+    result = await job.fetch_and_sync_data(
+        batch_size=100,
+        delay_s=delay_s,
+        jitter_s=jitter_s,
+    )
     logger.info("Job ArgenProp finalizado. csv_path=%s result=%s", csv_path, result)
 
 

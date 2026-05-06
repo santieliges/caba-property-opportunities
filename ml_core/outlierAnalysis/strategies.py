@@ -1,6 +1,33 @@
 import numpy as np
 import pandas as pd
-from scipy import stats
+
+
+def _maybe_add_price_columns(df, y_true=None, y_pred=None):
+    if "precio" not in df.columns or y_pred is None or y_true is None:
+        return
+
+    precio_obs = pd.to_numeric(df["precio"], errors="coerce").to_numpy(dtype=float)
+    y_true_arr = np.asarray(y_true, dtype=float).reshape(-1)
+    y_pred_arr = np.asarray(y_pred, dtype=float).reshape(-1)
+
+    valid = (
+        np.isfinite(precio_obs)
+        & (precio_obs > 0)
+        & np.isfinite(y_true_arr)
+        & np.isfinite(y_pred_arr)
+    )
+    if valid.sum() == 0:
+        return
+
+    # Heurística simple: si y_true está mucho más cerca de log(precio) que de
+    # precio crudo, asumimos que el target del modelo está en escala log.
+    log_diff = np.nanmedian(np.abs(y_true_arr[valid] - np.log(precio_obs[valid])))
+    raw_diff = np.nanmedian(np.abs(y_true_arr[valid] - precio_obs[valid]))
+
+    if np.isfinite(log_diff) and np.isfinite(raw_diff) and log_diff < raw_diff:
+        df["precio_estimado"] = np.exp(y_pred_arr)
+        df["precio_observado_modelo"] = np.exp(y_true_arr)
+
 
 class Strategy:
 
@@ -32,53 +59,117 @@ class ZTestStrategy(Strategy):
         super().__init__("ztest", requires_weights=True)
 
     def run(self, res, gdf, detector, w, params_for_method, output_dir, model_name, **kwargs):
+        alpha = params_for_method.get("alpha", 0.05)
+        tail = params_for_method.get("tail", "lower")
+
+        def set_positional_values(df, positions, columns, values):
+            pos_arr = np.asarray(positions, dtype=int).reshape(-1)
+            if pos_arr.size == 0:
+                return
+            col_list = [columns] if isinstance(columns, str) else list(columns)
+            col_idx = [df.columns.get_loc(col) for col in col_list]
+            if len(col_idx) == 1:
+                df.iloc[pos_arr, col_idx[0]] = values
+            else:
+                df.iloc[pos_arr, col_idx] = values
 
         z_outliers = detector.z_test_outliers(
             y=res,
             robust=params_for_method.get("robust", False),
             w=w,
             z_threshold=params_for_method.get("z_threshold", 3.0),
-            z_threshold_min=params_for_method.get("z_threshold_min")
+            z_threshold_min=params_for_method.get("z_threshold_min"),
+            tail=tail,
         )
 
         z_scores = z_outliers["z_scores"]
+        p_values = z_outliers["p_values"]
+        y_true = kwargs.get("y_true")
+        y_pred = kwargs.get("y_pred")
 
-        def enrich_with_z_scores(df, idx):
-            enriched = df.copy()
-            scores = z_scores[idx]
-            enriched["z_score"] = scores
-            enriched["abs_z_score"] = np.abs(scores)
-            return enriched
+        z_df = gdf.copy()
+        z_df["residuo"] = np.asarray(res).reshape(-1)
+        z_df["z_score"] = z_scores
+        z_df["abs_z_score"] = np.abs(z_scores)
+        z_df["p_value"] = p_values
+        z_df["p_value_z"] = p_values
+        z_df["is_outlier"] = np.isfinite(p_values) & (p_values < alpha)
+        z_df["tipo_valor_atipico"] = "NO_ATIPICO"
+        z_df["severidad_valor_atipico"] = "NO_ATIPICO"
 
-        gdf_low_ext = enrich_with_z_scores(gdf.iloc[z_outliers["low_outliers_idx"]], z_outliers["low_outliers_idx"])
-        gdf_high_ext = enrich_with_z_scores(gdf.iloc[z_outliers["high_outliers_idx"]], z_outliers["high_outliers_idx"])
+        if y_true is not None:
+            z_df["valor_observado"] = np.asarray(y_true).reshape(-1)
+        if y_pred is not None:
+            pred_values = np.asarray(y_pred).reshape(-1)
+            z_df["valor_predicho"] = pred_values
+            z_df["valor_esperado"] = pred_values
+        _maybe_add_price_columns(z_df, y_true=y_true, y_pred=y_pred)
 
-        gdf_low_ext["tipo_valor_atipico"] = "BAJO"
-        gdf_high_ext["tipo_valor_atipico"] = "ALTO"
-        gdf_low_ext["severidad_valor_atipico"] = "EXTREMO"
-        gdf_high_ext["severidad_valor_atipico"] = "EXTREMO"
+        if tail in {"two-sided", "lower"}:
+            set_positional_values(
+                z_df,
+                z_outliers["low_outliers_idx"],
+                "tipo_valor_atipico",
+                "BAJO",
+            )
+        if tail in {"two-sided", "upper"}:
+            set_positional_values(
+                z_df,
+                z_outliers["high_outliers_idx"],
+                "tipo_valor_atipico",
+                "ALTO",
+            )
 
-        if z_outliers.get("borderline_outliers_idx") is None:
-            z_df = pd.concat([gdf_low_ext, gdf_high_ext])
+        if z_outliers.get("borderline_low_outliers_idx") is not None:
+            set_positional_values(
+                z_df,
+                z_outliers["borderline_low_outliers_idx"],
+                ["tipo_valor_atipico", "severidad_valor_atipico"],
+                ["BAJO", "MODERADO"],
+            )
+        if z_outliers.get("borderline_high_outliers_idx") is not None:
+            set_positional_values(
+                z_df,
+                z_outliers["borderline_high_outliers_idx"],
+                ["tipo_valor_atipico", "severidad_valor_atipico"],
+                ["ALTO", "MODERADO"],
+            )
+
+        if tail in {"two-sided", "lower"}:
+            set_positional_values(
+                z_df,
+                z_outliers["low_outliers_idx"],
+                ["tipo_valor_atipico", "severidad_valor_atipico"],
+                ["BAJO", "EXTREMO"],
+            )
+        if tail in {"two-sided", "upper"}:
+            set_positional_values(
+                z_df,
+                z_outliers["high_outliers_idx"],
+                ["tipo_valor_atipico", "severidad_valor_atipico"],
+                ["ALTO", "EXTREMO"],
+            )
+
+        if tail == "lower":
+            z_df.loc[z_df["is_outlier"], "tipo_valor_atipico"] = "BAJO"
+        elif tail == "upper":
+            z_df.loc[z_df["is_outlier"], "tipo_valor_atipico"] = "ALTO"
         else:
-            gdf_low_mod = enrich_with_z_scores(
-                gdf.iloc[z_outliers["borderline_low_outliers_idx"]],
-                z_outliers["borderline_low_outliers_idx"]
-            )
-            gdf_high_mod = enrich_with_z_scores(
-                gdf.iloc[z_outliers["borderline_high_outliers_idx"]],
-                z_outliers["borderline_high_outliers_idx"]
-            )
+            negative_sig = z_df["is_outlier"] & (z_df["z_score"] < 0)
+            positive_sig = z_df["is_outlier"] & (z_df["z_score"] > 0)
+            z_df.loc[negative_sig, "tipo_valor_atipico"] = "BAJO"
+            z_df.loc[positive_sig, "tipo_valor_atipico"] = "ALTO"
 
-            gdf_low_mod["tipo_valor_atipico"] = "BAJO"
-            gdf_high_mod["tipo_valor_atipico"] = "ALTO"
+        z_df.loc[
+            z_df["is_outlier"] & (z_df["severidad_valor_atipico"] == "NO_ATIPICO"),
+            "severidad_valor_atipico",
+        ] = "SIGNIFICATIVO"
 
-            gdf_low_mod["severidad_valor_atipico"] = "MODERADO"
-            gdf_high_mod["severidad_valor_atipico"] = "MODERADO"
-
-            z_df = pd.concat([gdf_low_mod, gdf_high_mod, gdf_low_ext, gdf_high_ext])
-
-        z_df = z_df.sort_values("abs_z_score", ascending=False)
+        z_df = z_df.sort_values(
+            ["is_outlier", "p_value", "abs_z_score"],
+            ascending=[False, True, False],
+            na_position="last",
+        )
 
         return z_df
 
@@ -150,6 +241,7 @@ class CombinedZLisaStrategy(Strategy):
     def run(self, res, gdf, detector, w, coords, output_dir, model_name, params_for_method, **kwargs):
         alpha = params_for_method.get("alpha", 0.05)  # Nivel de significancia
         permutations = params_for_method.get("permutations", 999)
+        tail = params_for_method.get("tail", "lower")
 
         # 1. Z-test robusto y espacial (cola inferior)
         z_outliers = detector.z_test_outliers(
@@ -157,13 +249,10 @@ class CombinedZLisaStrategy(Strategy):
             w=w,
             robust=True,  # Siempre robusto con MAD
             z_threshold=params_for_method.get("z_threshold", 3.0),
+            tail=tail,
         )
         z_scores = z_outliers["z_scores"]
-
-        # P-values para cola inferior (valores bajos atípicos)
-        # Para z_score negativo (bajo), p_value = P(Z <= z_score) = norm.cdf(z_score)
-        # Para z_score positivo, p_value = 1 (no atípico bajo)
-        p_values_z = np.where(z_scores < 0, stats.norm.cdf(z_scores), 1.0)
+        p_values_z = z_outliers["p_values"]
 
         # 2. LISA con Local Moran's I
         lisa_results = detector.local_morans_I(
@@ -182,20 +271,9 @@ class CombinedZLisaStrategy(Strategy):
             )
         quadrants = lisa_results["quadrant"]
 
-        # 3. Score combinado
-        # Priorizamos LH porque representa residuos bajos (propiedades
-        # baratas respecto a la prediccion) rodeados de vecinos con
-        # residuos altos, el patron de oportunidad que mas interesa.
-        factor = np.zeros(len(quadrants))
-        factor[quadrants == "LH"] = 1.5
-        factor[quadrants == "LL"] = 0.5
-        factor[quadrants == "HH"] = 0
-        factor[quadrants == "HL"] = -1
-
-        # Score = evidencia de residual bajo + ajuste espacial por cuadrante.
-        # LH recibe el mayor premio, LL un premio moderado, HH neutro y
-        # HL penalizacion.
-        score = (1 - p_values_z) + (1 - p_values_lisa) * factor
+        # 3. Score principal: solo evidencia del z-test para cola inferior.
+        z_evidence = np.where(z_scores < 0, 1 - p_values_z, 0.0)
+        score = z_evidence
 
         # Crear DataFrame con todos los valores
         gdf_combined = gdf.copy()
@@ -205,7 +283,16 @@ class CombinedZLisaStrategy(Strategy):
         gdf_combined["quadrant"] = quadrants
         gdf_combined["combined_score"] = score
         gdf_combined["residuo"] = res
-        gdf_combined["is_outlier"] = p_values_z < alpha  # Columna para marcar outliers
+        gdf_combined["is_outlier"] = np.isfinite(p_values_z) & (p_values_z < alpha)
+        y_true = kwargs.get("y_true")
+        y_pred = kwargs.get("y_pred")
+        if y_true is not None:
+            gdf_combined["valor_observado"] = np.asarray(y_true).reshape(-1)
+        if y_pred is not None:
+            pred_values = np.asarray(y_pred).reshape(-1)
+            gdf_combined["valor_predicho"] = pred_values
+            gdf_combined["valor_esperado"] = pred_values
+        _maybe_add_price_columns(gdf_combined, y_true=y_true, y_pred=y_pred)
 
         # Guardar CSV con todos los valores y la marca de outlier
         return gdf_combined

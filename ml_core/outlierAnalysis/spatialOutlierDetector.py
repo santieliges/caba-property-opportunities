@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from scipy import stats
 
 
 class SpatialOutlierDetector:
@@ -13,7 +14,8 @@ class SpatialOutlierDetector:
         z_threshold=3.0,
         z_threshold_min=None,
         min_neighbors=3,
-        robust=True
+        robust=True,
+        tail="two-sided",
     ):
         """
         Z-test for outlier detection.
@@ -30,6 +32,8 @@ class SpatialOutlierDetector:
         z_threshold_min : float | None
             Si se provee, también devuelve un segundo grupo de outliers "moderados":
             z_threshold_min <= |z| <= z_threshold.
+        tail : {"two-sided", "lower", "upper"}
+            Define si el test es bilateral, cola inferior o cola superior.
         """
 
         y = np.asarray(y).ravel()
@@ -101,8 +105,30 @@ class SpatialOutlierDetector:
         if z_threshold_min is not None and z_threshold_min >= z_threshold:
             raise ValueError("z_threshold_min debe ser menor que z_threshold")
 
+        if tail not in {"two-sided", "lower", "upper"}:
+            raise ValueError(
+                "tail debe ser 'two-sided', 'lower' o 'upper'"
+            )
+
         abs_z = np.abs(z_scores)
-        outlier_mask = abs_z > z_threshold
+        p_values = np.full(n, np.nan)
+        finite_mask = np.isfinite(z_scores)
+
+        if tail == "two-sided":
+            p_values[finite_mask] = 2.0 * stats.norm.sf(abs_z[finite_mask])
+            outlier_mask = abs_z > z_threshold
+            high_outliers_mask = z_scores > z_threshold
+            low_outliers_mask = z_scores < -z_threshold
+        elif tail == "lower":
+            p_values[finite_mask] = stats.norm.cdf(z_scores[finite_mask])
+            outlier_mask = z_scores < -z_threshold
+            high_outliers_mask = np.zeros(n, dtype=bool)
+            low_outliers_mask = outlier_mask.copy()
+        else:
+            p_values[finite_mask] = stats.norm.sf(z_scores[finite_mask])
+            outlier_mask = z_scores > z_threshold
+            high_outliers_mask = outlier_mask.copy()
+            low_outliers_mask = np.zeros(n, dtype=bool)
 
         borderline_outliers_mask = None
         borderline_outliers_idx = None
@@ -112,22 +138,49 @@ class SpatialOutlierDetector:
         borderline_low_outliers_idx = None
 
         if z_threshold_min is not None:
-            borderline_outliers_mask = (abs_z >= z_threshold_min) & (abs_z <= z_threshold)
+            if tail == "two-sided":
+                borderline_outliers_mask = (
+                    (abs_z >= z_threshold_min)
+                    & (abs_z <= z_threshold)
+                )
+                borderline_high_outliers_mask = (
+                    (z_scores >= z_threshold_min)
+                    & (z_scores <= z_threshold)
+                )
+                borderline_low_outliers_mask = (
+                    (z_scores <= -z_threshold_min)
+                    & (z_scores >= -z_threshold)
+                )
+            elif tail == "lower":
+                borderline_low_outliers_mask = (
+                    (z_scores <= -z_threshold_min)
+                    & (z_scores >= -z_threshold)
+                )
+                borderline_high_outliers_mask = np.zeros(n, dtype=bool)
+                borderline_outliers_mask = borderline_low_outliers_mask.copy()
+            else:
+                borderline_high_outliers_mask = (
+                    (z_scores >= z_threshold_min)
+                    & (z_scores <= z_threshold)
+                )
+                borderline_low_outliers_mask = np.zeros(n, dtype=bool)
+                borderline_outliers_mask = borderline_high_outliers_mask.copy()
+
             borderline_outliers_idx = np.where(borderline_outliers_mask)[0]
-            borderline_high_outliers_mask = (z_scores >= z_threshold_min) & (z_scores <= z_threshold)
             borderline_high_outliers_idx = np.where(borderline_high_outliers_mask)[0]
-            borderline_low_outliers_mask = (z_scores <= -z_threshold_min) & (z_scores >= -z_threshold)
             borderline_low_outliers_idx = np.where(borderline_low_outliers_mask)[0]
 
         return {
             "z_scores": z_scores,
+            "p_values": p_values,
+            "tail": tail,
             "outlier_mask": outlier_mask,
             "outlier_idx": np.where(outlier_mask)[0],
             "inlier_mask": ~outlier_mask,
-            "high_outliers_mask": z_scores > z_threshold,
-            "high_outliers_idx": np.where(z_scores > z_threshold)[0],
-            "low_outliers_mask": z_scores < -z_threshold,
-            "low_outliers_idx": np.where(z_scores < -z_threshold)[0],
+            "high_outliers_mask": high_outliers_mask,
+            "high_outliers_idx": np.where(high_outliers_mask)[0],
+            "low_outliers_mask": low_outliers_mask,
+            "low_outliers_idx": np.where(low_outliers_mask)[0],
             "borderline_outliers_mask": borderline_outliers_mask,
             "borderline_outliers_idx": borderline_outliers_idx,
             "borderline_high_outliers_mask": borderline_high_outliers_mask,
@@ -172,8 +225,12 @@ class SpatialOutlierDetector:
             I = np.zeros(n)
 
             for i in range(n):
-                neighs = w.neighbors[i]
-                weights = w.weights[i]
+                neighs = np.asarray(w.neighbors.get(i, []), dtype=int)
+                weights = np.asarray(w.weights.get(i, []), dtype=float)
+
+                if neighs.size == 0 or weights.size == 0:
+                    I[i] = 0.0
+                    continue
 
                 I[i] = z[i] * np.sum(weights * z[neighs])
 
@@ -197,8 +254,12 @@ class SpatialOutlierDetector:
 
                 for i in range(n):
                     sims = np.zeros(permutations)
-                    neighs = w.neighbors[i]
-                    weights = w.weights[i]
+                    neighs = np.asarray(w.neighbors.get(i, []), dtype=int)
+                    weights = np.asarray(w.weights.get(i, []), dtype=float)
+
+                    if neighs.size == 0 or weights.size == 0:
+                        pvals[i] = 1.0
+                        continue
 
                     for k in range(permutations):
                         perm_z = np.random.permutation(z)

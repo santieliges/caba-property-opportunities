@@ -1,6 +1,6 @@
 # Pipelines
 
-from .pipelineBuilder import (
+from .pipeline_builder import (
     build_cleaning_pipeline,
     build_feature_engineering_pipeline,
     build_preprocessing_pipeline,
@@ -25,6 +25,7 @@ from .transformers import (
     EstadoImputer,
     DisposicionEncoder,
 )
+from .knhs import KNHSSchema, KNHSWeightSpec, PreparedKNHS
 
 
 __all__ = [
@@ -38,11 +39,15 @@ __all__ = [
     "build_venta_splits",
     "build_alquiler_splits",
 
+
     # Transformers
     "NormalizeStringsTransformer",
     "FilterSmallBarriosTransformer",
     "AntiguedadImputer",
     "EstadoImputer",
     "DisposicionEncoder",
+    "KNHSSchema",
+    "KNHSWeightSpec",
+    "PreparedKNHS",
 
 ]

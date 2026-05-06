@@ -1,1 +1,1 @@
-"""Servicio autocontenido para el scrapper."""
+"""Servicio autocontenido para el scraper."""

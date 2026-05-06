@@ -269,14 +269,14 @@ def generar_grid_predicciones(
         )
 
     # usar área real del depto estándar
-    area_real = std_depto["area_m2_total"]
-    if not np.isfinite(area_real) or area_real <= 0:
+    area_cubierta = std_depto["area_m2_cubierta"]
+    if not np.isfinite(area_cubierta) or area_cubierta <= 0:
         raise ValueError(
-            "area_m2_total del departamento estándar debe ser positiva para calcular precio_m2. "
-            f"Recibido: {area_real!r}."
+            "area_m2_cubierta del departamento estándar debe ser positiva para calcular precio_m2. "
+            f"Recibido: {area_cubierta!r}."
         )
 
-    precio_m2 = precio / area_real
+    precio_m2 = precio / area_cubierta
     if not np.all(np.isfinite(precio_m2)):
         raise ValueError(
             "La grilla contiene valores no finitos en precio_m2. "
@@ -384,15 +384,29 @@ class MapaPrecio:
 
 # Clase base para visualizadores de mapas de outliers
 class OutlierMapVisualizer(ABC):
-    def __init__(self, gdf_all, results_df, method_name, barrios_path=None):
+    def __init__(
+        self,
+        gdf_all,
+        results_df,
+        method_name,
+        barrios_path=None,
+        *,
+        filter_config=None,
+        popup_fields=None,
+        popup_field_config=None,
+    ):
         self.gdf_all = gdf_all
         self.results_df = results_df.copy()
         if "method" in self.results_df.columns and method_name is not None:
             self.results_df = self.results_df.loc[self.results_df["method"] == method_name].copy()
         self.method_name = method_name
         self.barrios_path = barrios_path or "../GeoData/barrios.geojson"
+        self.filter_config = filter_config
+        self.popup_fields = popup_fields
+        self.popup_field_config = popup_field_config
         self.map_df = None
         self.folium_map = None
+        self._marker_registry = []
 
     def _ensure_column(self, column_name, default_value):
         if column_name not in self.map_df.columns:
@@ -462,6 +476,9 @@ class OutlierMapVisualizer(ABC):
 
     def add_markers(self):
         """Agrega marcadores al mapa."""
+        filter_specs = self._prepare_filter_specs(self._get_filter_specs())
+        self._marker_registry = []
+
         for _, row in self.map_df.iterrows():
             style = self.get_marker_style(row)
             marker = folium.CircleMarker(
@@ -471,6 +488,562 @@ class OutlierMapVisualizer(ABC):
             marker.add_child(folium.Tooltip(self.get_tooltip(row)))
             marker.add_child(folium.Popup(self.get_popup_html(row)))
             marker.add_to(self.folium_map)
+
+            if filter_specs:
+                self._marker_registry.append(
+                    self._build_marker_registry_item(
+                        row=row,
+                        marker_name=marker.get_name(),
+                        filter_specs=filter_specs,
+                    )
+                )
+
+        if filter_specs:
+            self._add_filter_controls(filter_specs)
+
+    def _numeric_bounds(self, column_name):
+        values = pd.to_numeric(self.map_df[column_name], errors="coerce")
+        values = values[np.isfinite(values)]
+        if values.empty:
+            return (0, 0)
+        return (float(values.min()), float(values.max()))
+
+    @staticmethod
+    def _to_js_number(value):
+        if pd.isna(value):
+            return None
+        return float(value)
+
+    @staticmethod
+    def _normalize_flag(value):
+        if pd.isna(value):
+            return None
+        if isinstance(value, (bool, np.bool_)):
+            return bool(value)
+        if isinstance(value, (int, float, np.integer, np.floating)):
+            if not np.isfinite(value):
+                return None
+            return bool(int(value))
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "si", "sí", "yes", "y", "pozo"}:
+                return True
+            if normalized in {"0", "false", "no", "n"}:
+                return False
+        return None
+
+    @classmethod
+    def _format_flag_text(cls, value):
+        normalized = cls._normalize_flag(value)
+        if normalized is None:
+            return "N/D"
+        return "Sí" if normalized else "No"
+
+    @staticmethod
+    def _infer_display_price(row):
+        explicit_price = row.get("precio_estimado")
+        if pd.notna(explicit_price):
+            return float(explicit_price)
+
+        precio = row.get("precio")
+        valor_observado = row.get("valor_observado")
+        valor_predicho = row.get("valor_predicho")
+        if not (
+            pd.notna(precio)
+            and pd.notna(valor_observado)
+            and pd.notna(valor_predicho)
+        ):
+            return np.nan
+
+        precio = float(precio)
+        valor_observado = float(valor_observado)
+        valor_predicho = float(valor_predicho)
+        if not np.isfinite(precio) or precio <= 0:
+            return np.nan
+
+        log_precio = np.log(precio)
+        if abs(valor_observado - log_precio) < abs(valor_observado - precio):
+            return float(np.exp(valor_predicho))
+        return float(valor_predicho)
+
+    @staticmethod
+    def _humanize_field_name(field_name):
+        return field_name.replace("_", " ").strip().capitalize()
+
+    @staticmethod
+    def _merge_field_config(default_config, override_config):
+        merged = {
+            field_name: dict(spec)
+            for field_name, spec in (default_config or {}).items()
+        }
+        for field_name, spec in (override_config or {}).items():
+            merged[field_name] = {
+                **merged.get(field_name, {}),
+                **dict(spec),
+            }
+        return merged
+
+    def _default_filter_config(self):
+        return {}
+
+    def _resolved_filter_config(self):
+        if self.filter_config is not None:
+            return {
+                field_name: dict(spec)
+                for field_name, spec in self.filter_config.items()
+            }
+        return self._merge_field_config(
+            self._default_filter_config(),
+            None,
+        )
+
+    def _default_popup_fields(self):
+        return []
+
+    def _resolved_popup_fields(self):
+        if self.popup_fields is not None:
+            return list(self.popup_fields)
+        return list(self._default_popup_fields())
+
+    def _default_popup_field_config(self):
+        return {
+            "precio": {
+                "label": "Precio",
+                "formatter": "price",
+            },
+            "precio_estimado": {
+                "label": "Precio estimado",
+                "formatter": "estimated_price",
+            },
+            "area_m2_total": {
+                "label": "Superficie",
+                "formatter": "area",
+            },
+            "ambientes": {
+                "label": "Ambientes",
+                "formatter": "integer",
+            },
+            "antiguedad": {
+                "label": "Antigüedad",
+                "formatter": "years",
+            },
+            "pozo": {
+                "label": "En pozo",
+                "formatter": "flag",
+            },
+            "is_outlier": {
+                "label": "Outlier",
+                "formatter": "yes_no",
+            },
+            "tipo_valor_atipico": {
+                "label": "Tipo atípico",
+                "formatter": "text",
+            },
+            "severidad_valor_atipico": {
+                "label": "Severidad",
+                "formatter": "text",
+            },
+            "z_score": {
+                "label": "Z-score",
+                "formatter": "float",
+                "decimals": 2,
+            },
+            "p_value": {
+                "label": "P-value",
+                "formatter": "float",
+                "decimals": 4,
+            },
+            "residuo": {
+                "label": "Residual",
+                "formatter": "float",
+                "decimals": 4,
+            },
+            "quadrant": {
+                "label": "Cuadrante LISA",
+                "formatter": "text",
+            },
+            "p_value_z": {
+                "label": "P-value Z",
+                "formatter": "float",
+                "decimals": 3,
+            },
+            "p_value_lisa": {
+                "label": "P-value LISA",
+                "formatter": "float",
+                "decimals": 3,
+            },
+            "url": {
+                "label": "Link",
+                "formatter": "link",
+            },
+        }
+
+    def _resolved_popup_field_config(self):
+        return self._merge_field_config(
+            self._default_popup_field_config(),
+            self.popup_field_config,
+        )
+
+    def _popup_raw_value(self, row, field_name):
+        if field_name == "precio_estimado":
+            return self._infer_display_price(row)
+        return row.get(field_name)
+
+    def _format_popup_value(self, row, field_name, spec):
+        formatter = spec.get("formatter", "text")
+        value = self._popup_raw_value(row, field_name)
+
+        if formatter == "link":
+            url = row.get("url")
+            return f'<a href="{url}" target="_blank">Ver publicación</a>' if url else "Sin link"
+        if formatter == "price":
+            return f"USD {value:,.0f}" if pd.notna(value) else "N/D"
+        if formatter == "estimated_price":
+            return f"USD {value:,.0f}" if pd.notna(value) else "N/D"
+        if formatter == "area":
+            return f"{value:,.0f} m²" if pd.notna(value) else "N/D"
+        if formatter == "integer":
+            return f"{value:,.0f}" if pd.notna(value) else "N/D"
+        if formatter == "years":
+            return f"{value:,.0f} años" if pd.notna(value) else "N/D"
+        if formatter == "flag":
+            return self._format_flag_text(value)
+        if formatter == "yes_no":
+            if pd.isna(value):
+                return "N/D"
+            return "Sí" if bool(value) else "No"
+        if formatter == "float":
+            decimals = int(spec.get("decimals", 2))
+            return f"{float(value):.{decimals}f}" if pd.notna(value) else "N/D"
+        return "N/D" if pd.isna(value) else str(value)
+
+    def _render_popup_lines(self, row, field_names):
+        popup_config = self._resolved_popup_field_config()
+        lines = []
+        for field_name in field_names:
+            spec = popup_config.get(
+                field_name,
+                {
+                    "label": self._humanize_field_name(field_name),
+                    "formatter": "text",
+                },
+            )
+            rendered = self._format_popup_value(
+                row,
+                field_name,
+                spec,
+            )
+            lines.append(f"<b>{spec['label']}:</b> {rendered}")
+        return lines
+
+    def build_filter_specs(
+        self,
+        filter_config,
+    ):
+        specs = []
+        for field_name, field_spec in (filter_config or {}).items():
+            if field_name not in self.map_df.columns:
+                continue
+
+            field_spec = dict(field_spec)
+            kind = field_spec.get("kind", self._infer_filter_kind(field_name))
+            spec = {
+                "field": field_name,
+                "label": field_spec.get(
+                    "label",
+                    self._humanize_field_name(field_name),
+                ),
+                "kind": kind,
+            }
+
+            if kind == "boolean":
+                spec["boolean_labels"] = {
+                    "all": "Todos",
+                    "true": "Solo sí",
+                    "false": "Solo no",
+                    **field_spec.get("boolean_labels", {}),
+                }
+            elif kind == "categorical":
+                values = self.map_df[field_name]
+                options = sorted(
+                    {
+                        str(value)
+                        for value in values
+                        if pd.notna(value) and value != ""
+                    }
+                )
+                spec["options"] = options
+
+            specs.append(spec)
+
+        return specs
+
+    def _infer_filter_kind(self, field_name):
+        values = self.map_df[field_name]
+
+        normalized_bool = values.map(self._normalize_flag)
+        non_null_values = values[values.notna()]
+        if (
+            len(non_null_values) > 0
+            and normalized_bool.notna().sum() == len(non_null_values)
+        ):
+            return "boolean"
+
+        numeric = pd.to_numeric(values, errors="coerce")
+        if np.isfinite(numeric.to_numpy(dtype=float, na_value=np.nan)).any():
+            return "numeric"
+
+        return "categorical"
+
+    def _get_filter_specs(self):
+        return self.build_filter_specs(
+            self._resolved_filter_config(),
+        )
+
+    def _get_filter_panel_title(self):
+        return f"Filtros {self.method_name}"
+
+    def _get_filter_control_prefix(self):
+        return (self.method_name or "map").replace("_", "-")
+
+    def _prepare_filter_specs(self, filter_specs):
+        prepared_specs = []
+        prefix = self._get_filter_control_prefix()
+        for spec in filter_specs or []:
+            prepared = dict(spec)
+            prepared["registry_key"] = spec.get("registry_key", spec["field"])
+            prepared["control_key"] = spec.get("control_key", spec["field"])
+            control_slug = prepared["control_key"].replace("_", "-")
+
+            if prepared["kind"] == "numeric":
+                bounds = self._numeric_bounds(prepared["field"])
+                prepared["min_value"] = bounds[0]
+                prepared["max_value"] = bounds[1]
+                prepared["min_id"] = f"{prefix}-{control_slug}-min"
+                prepared["max_id"] = f"{prefix}-{control_slug}-max"
+            elif prepared["kind"] == "boolean":
+                prepared["select_id"] = f"{prefix}-{control_slug}"
+            elif prepared["kind"] == "categorical":
+                prepared["container_id"] = f"{prefix}-{control_slug}-options"
+                prepared["checkbox_class"] = f"{prefix}-{control_slug}-checkbox"
+            else:
+                raise ValueError(f"Tipo de filtro desconocido: {prepared['kind']!r}")
+
+            prepared_specs.append(prepared)
+
+        return prepared_specs
+
+    def _serialize_filter_value(self, row, spec):
+        field_name = spec["field"]
+        value = row.get(field_name)
+        if spec["kind"] == "numeric":
+            return self._to_js_number(value)
+        if spec["kind"] == "boolean":
+            return self._normalize_flag(value)
+        return None if pd.isna(value) else str(value)
+
+    def _build_marker_registry_item(self, *, row, marker_name, filter_specs):
+        item = {"marker_name": marker_name}
+        for spec in filter_specs:
+            item[spec["registry_key"]] = self._serialize_filter_value(row, spec)
+        return item
+
+    def _render_filter_control_html(self, filter_specs):
+        prefix = self._get_filter_control_prefix()
+        html_parts = [
+            f"""
+        <div id="{prefix}-filters" style="
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            z-index: 9999;
+            width: 280px;
+            background: rgba(255, 255, 255, 0.96);
+            border: 1px solid #d1d5db;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+            padding: 14px 14px 12px 14px;
+            font-family: Arial, sans-serif;
+            color: #111827;
+        ">
+            <div style="font-size: 15px; font-weight: 700; margin-bottom: 10px;">{self._get_filter_panel_title()}</div>
+        """
+        ]
+
+        for spec in filter_specs:
+            if spec["kind"] == "numeric":
+                html_parts.append(
+                    f"""
+            <div style="font-size: 12px; font-weight: 600; margin-bottom: 4px;">{spec["label"]}</div>
+            <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+                <input id="{spec["min_id"]}" type="number" step="any" value="{spec["min_value"]}" style="width: 100%; padding: 6px;">
+                <input id="{spec["max_id"]}" type="number" step="any" value="{spec["max_value"]}" style="width: 100%; padding: 6px;">
+            </div>
+                    """
+                )
+            elif spec["kind"] == "boolean":
+                labels = spec["boolean_labels"]
+                html_parts.append(
+                    f"""
+            <div style="font-size: 12px; font-weight: 600; margin-bottom: 4px;">{spec["label"]}</div>
+            <div style="margin-bottom: 12px;">
+                <select id="{spec["select_id"]}" style="width: 100%; padding: 6px;">
+                    <option value="all">{labels["all"]}</option>
+                    <option value="true">{labels["true"]}</option>
+                    <option value="false">{labels["false"]}</option>
+                </select>
+            </div>
+                    """
+                )
+            else:
+                html_parts.append(
+                    f"""
+            <div style="font-size: 12px; font-weight: 600; margin-bottom: 4px;">{spec["label"]}</div>
+            <div id="{spec["container_id"]}" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-bottom: 12px;"></div>
+                    """
+                )
+
+        html_parts.append(
+            f"""
+            <div style="display: flex; gap: 8px;">
+                <button id="apply-{prefix}-filters" type="button" style="flex: 1; padding: 8px; border: 0; border-radius: 8px; background: #1d4ed8; color: white; cursor: pointer;">Aplicar</button>
+                <button id="reset-{prefix}-filters" type="button" style="flex: 1; padding: 8px; border: 1px solid #cbd5e1; border-radius: 8px; background: white; cursor: pointer;">Reset</button>
+            </div>
+        </div>
+            """
+        )
+
+        return "".join(html_parts)
+
+    def _add_filter_controls(self, filter_specs):
+        if not self._marker_registry:
+            return
+
+        prefix = self._get_filter_control_prefix()
+        map_name = self.folium_map.get_name()
+        registry_json = json.dumps(self._marker_registry, ensure_ascii=False)
+        specs_json = json.dumps(filter_specs, ensure_ascii=False)
+        control_html = self._render_filter_control_html(filter_specs)
+
+        script_html = f"""
+        <script>
+        (function() {{
+            function initializeFilters() {{
+                var missingMarkers = {registry_json}.some(function(item) {{
+                    return !window[item.marker_name];
+                }});
+                if (missingMarkers) {{
+                    window.setTimeout(initializeFilters, 120);
+                    return;
+                }}
+
+                var map = {map_name};
+                var markerRegistry = {registry_json};
+                var filterSpecs = {specs_json};
+
+                filterSpecs.forEach(function(spec) {{
+                    if (spec.kind !== "categorical") return;
+                    var container = document.getElementById(spec.container_id);
+                    if (!container) return;
+                    var options = spec.options || [];
+                    container.innerHTML = options.map(function(option) {{
+                        return '<label style="display:flex; align-items:center; gap:6px; font-size:12px;">'
+                            + '<input type="checkbox" class="' + spec.checkbox_class + '" value="' + option + '" checked>'
+                            + '<span>' + option + '</span>'
+                            + '</label>';
+                    }}).join("");
+                }});
+
+                function readNumber(id) {{
+                    var raw = document.getElementById(id).value;
+                    if (raw === "" || raw === null) return null;
+                    var parsed = Number(raw);
+                    return Number.isFinite(parsed) ? parsed : null;
+                }}
+
+                function passesRange(value, minValue, maxValue) {{
+                    if (value === null || value === undefined || Number.isNaN(value)) {{
+                        return false;
+                    }}
+                    if (minValue !== null && value < minValue) return false;
+                    if (maxValue !== null && value > maxValue) return false;
+                    return true;
+                }}
+
+                function selectedCategoricalOptions(spec) {{
+                    return Array.from(document.querySelectorAll("." + spec.checkbox_class + ":checked"))
+                        .map(function(el) {{ return el.value; }});
+                }}
+
+                function passesSpec(item, spec) {{
+                    var value = item[spec.registry_key];
+                    if (spec.kind === "numeric") {{
+                        return passesRange(value, readNumber(spec.min_id), readNumber(spec.max_id));
+                    }}
+                    if (spec.kind === "boolean") {{
+                        var mode = document.getElementById(spec.select_id).value;
+                        if (mode === "true") return value === true;
+                        if (mode === "false") return value === false;
+                        return true;
+                    }}
+                    if (spec.kind === "categorical") {{
+                        var selected = selectedCategoricalOptions(spec);
+                        if (selected.length === 0) return true;
+                        return selected.includes(String(value));
+                    }}
+                    return true;
+                }}
+
+                function applyFilters() {{
+                    markerRegistry.forEach(function(item) {{
+                        var marker = window[item.marker_name];
+                        if (!marker) return;
+
+                        var visible = filterSpecs.every(function(spec) {{
+                            return passesSpec(item, spec);
+                        }});
+
+                        var onMap = map.hasLayer(marker);
+                        if (visible && !onMap) {{
+                            marker.addTo(map);
+                        }} else if (!visible && onMap) {{
+                            map.removeLayer(marker);
+                        }}
+                    }});
+                }}
+
+                function resetFilters() {{
+                    filterSpecs.forEach(function(spec) {{
+                        if (spec.kind === "numeric") {{
+                            document.getElementById(spec.min_id).value = spec.min_value;
+                            document.getElementById(spec.max_id).value = spec.max_value;
+                        }} else if (spec.kind === "boolean") {{
+                            document.getElementById(spec.select_id).value = "all";
+                        }} else if (spec.kind === "categorical") {{
+                            document.querySelectorAll("." + spec.checkbox_class).forEach(function(el) {{
+                                el.checked = true;
+                            }});
+                        }}
+                    }});
+                    applyFilters();
+                }}
+
+                document.getElementById("apply-{prefix}-filters").addEventListener("click", applyFilters);
+                document.getElementById("reset-{prefix}-filters").addEventListener("click", resetFilters);
+                applyFilters();
+            }}
+
+            if (document.readyState === "loading") {{
+                document.addEventListener("DOMContentLoaded", initializeFilters);
+            }} else {{
+                initializeFilters();
+            }}
+        }})();
+        </script>
+        """
+
+        self.folium_map.get_root().html.add_child(Element(control_html))
+        self.folium_map.get_root().html.add_child(Element(script_html))
 
     def build_map(self):
         """Construye el mapa completo."""
@@ -488,11 +1061,84 @@ class OutlierMapVisualizer(ABC):
 
 # Subclase para ZTest
 class ZTestMapVisualizer(OutlierMapVisualizer):
-    def __init__(self, gdf_all, results_df, barrios_path=None):
-        super().__init__(gdf_all, results_df, "ztest", barrios_path)
+    def __init__(
+        self,
+        gdf_all,
+        results_df,
+        barrios_path=None,
+        *,
+        filter_config=None,
+        popup_fields=None,
+        popup_field_config=None,
+    ):
+        OutlierMapVisualizer.__init__(
+            self,
+            gdf_all,
+            results_df,
+            "ztest",
+            barrios_path,
+            filter_config=filter_config,
+            popup_fields=popup_fields,
+            popup_field_config=popup_field_config,
+        )
+
+    def _default_filter_config(self):
+        return {
+            "precio": {
+                "kind": "numeric",
+                "label": "Precio",
+            },
+            "ambientes": {
+                "kind": "numeric",
+                "label": "Ambientes",
+            },
+            "area_m2_total": {
+                "kind": "numeric",
+                "label": "Metros cuadrados",
+            },
+            "is_outlier": {
+                "kind": "boolean",
+                "label": "Tipo de punto",
+                "boolean_labels": {
+                    "all": "Todos",
+                    "true": "Solo atípicos",
+                    "false": "Solo no atípicos",
+                },
+            },
+            "pozo": {
+                "kind": "boolean",
+                "label": "En pozo",
+                "boolean_labels": {
+                    "all": "Todos",
+                    "true": "Solo en pozo",
+                    "false": "Solo no en pozo",
+                },
+            },
+        }
+
+    def _default_popup_fields(self):
+        return [
+            "precio",
+            "precio_estimado",
+            "area_m2_total",
+            "ambientes",
+            "antiguedad",
+            "pozo",
+            "is_outlier",
+            "tipo_valor_atipico",
+            "severidad_valor_atipico",
+            "z_score",
+            "p_value",
+            "residuo",
+            "url",
+        ]
 
     def _add_default_columns(self):
-        self.map_df["es_atipico_ztest"] = self.map_df["z_score"].notna()
+        self.map_df["is_outlier"] = self._ensure_column(
+            "is_outlier",
+            False,
+        ).fillna(False)
+        self.map_df["es_atipico_ztest"] = self.map_df["is_outlier"]
         self.map_df["tipo_valor_atipico"] = self._ensure_column(
             "tipo_valor_atipico",
             "NO_ATIPICO",
@@ -505,52 +1151,55 @@ class ZTestMapVisualizer(OutlierMapVisualizer):
             "abs_z_score",
             0.0,
         ).fillna(0.0)
+        self.map_df["p_value"] = self._ensure_column(
+            "p_value",
+            np.nan,
+        )
 
     def get_marker_style(self, row):
-        if row["tipo_valor_atipico"] == "ALTO":
-            intensity = min(row["abs_z_score"] / 3.0, 1.0)  # Normalizar a 3.0 como max
-            color = self._lerp_color("#fca5a5", "#991b1b", intensity)
-            return {"color": color, "fillColor": color, "radius": 4 + intensity * 4, "fillOpacity": 0.9, "weight": 1}
-        elif row["tipo_valor_atipico"] == "BAJO":
-            intensity = min(row["abs_z_score"] / 3.0, 1.0)
-            color = self._lerp_color("#93c5fd", "#1d4ed8", intensity)
-            return {"color": color, "fillColor": color, "radius": 4 + intensity * 4, "fillOpacity": 0.9, "weight": 1}
-        else:
-            return {"color": "#9ca3af", "fillColor": "#9ca3af", "radius": 2, "fillOpacity": 0.35, "weight": 0.5}
+        p_value = pd.to_numeric(pd.Series([row.get("p_value")]), errors="coerce").iloc[0]
+        if pd.notna(p_value):
+            intensity = float(np.clip(1.0 - p_value, 0.0, 1.0))
+            color = self._lerp_color("#dbeafe", "#1d4ed8", intensity)
+            return {
+                "color": color,
+                "fillColor": color,
+                "radius": 3 + intensity * 5,
+                "fillOpacity": 0.35 + intensity * 0.55,
+                "weight": 0.6 + intensity * 0.8,
+            }
+        return {
+            "color": "#9ca3af",
+            "fillColor": "#9ca3af",
+            "radius": 2,
+            "fillOpacity": 0.35,
+            "weight": 0.5,
+        }
 
     def get_tooltip(self, row):
         if pd.notna(row.get("z_score")) and pd.notna(row.get("precio")):
-            return f"{row['tipo_valor_atipico']} | z={row['z_score']:.2f} | USD {row['precio']:,.0f}"
+            p_value = row.get("p_value")
+            p_value_txt = f"{p_value:.3f}" if pd.notna(p_value) else "N/D"
+            return (
+                f"{row['tipo_valor_atipico']} | z={row['z_score']:.2f} | "
+                f"p={p_value_txt} | USD {row['precio']:,.0f}"
+            )
         else:
             return f"Precio: USD {row['precio']:,.0f} | {row['area_m2_total']:,.0f} m² | {row['ambientes']:,.0f} amb"
 
     def get_popup_html(self, row):
-        precio = row.get("precio")
-        area = row.get("area_m2_total")
-        ambientes = row.get("ambientes")
-        antiguedad = row.get("antiguedad")
-        url = row.get("url")
-        z_score = row.get("z_score")
-        tipo = row.get("tipo_valor_atipico")
-        severidad = row.get("severidad_valor_atipico")
-
-        precio_txt = f"USD {precio:,.0f}" if pd.notna(precio) else "N/D"
-        area_txt = f"{area:,.0f} m²" if pd.notna(area) else "N/D"
-        ambientes_txt = f"{ambientes:,.0f}" if pd.notna(ambientes) else "N/D"
-        antiguedad_txt = f"{antiguedad:,.0f} años" if pd.notna(antiguedad) else "N/D"
-        z_score_txt = f"{z_score:.2f}" if pd.notna(z_score) else "N/D"
-        link_html = f'<a href="{url}" target="_blank">Ver publicación</a>' if url else "Sin link"
-
-        return (
-            f"<b>Precio:</b> {precio_txt}<br>"
-            f"<b>Superficie:</b> {area_txt}<br>"
-            f"<b>Ambientes:</b> {ambientes_txt}<br>"
-            f"<b>Antigüedad:</b> {antiguedad_txt}<br>"
-            f"<b>Tipo atípico:</b> {tipo}<br>"
-            f"<b>Severidad:</b> {severidad}<br>"
-            f"<b>Z-score:</b> {z_score_txt}<br>"
-            f"{link_html}"
+        return "<br>".join(
+            self._render_popup_lines(
+                row,
+                self._resolved_popup_fields(),
+            )
         )
+
+    def _get_filter_panel_title(self):
+        return "Filtros Z-Test"
+
+    def add_markers(self):
+        OutlierMapVisualizer.add_markers(self)
 
     @staticmethod
     def _lerp_color(a, b, amount):
@@ -566,273 +1215,124 @@ class ZTestMapVisualizer(OutlierMapVisualizer):
 
 # Subclase para Combined Z + LISA
 class CombinedZLisaMapVisualizer(OutlierMapVisualizer):
-    def __init__(self, gdf_all, results_df, barrios_path=None):
-        super().__init__(gdf_all, results_df, "combined_z_lisa", barrios_path)
-        self._marker_registry = []
-        self._score_scale = 1.0
+    def __init__(
+        self,
+        gdf_all,
+        results_df,
+        barrios_path=None,
+        *,
+        filter_config=None,
+        popup_fields=None,
+        popup_field_config=None,
+    ):
+        OutlierMapVisualizer.__init__(
+            self,
+            gdf_all,
+            results_df,
+            "combined_z_lisa",
+            barrios_path,
+            filter_config=filter_config,
+            popup_fields=popup_fields,
+            popup_field_config=popup_field_config,
+        )
+
+    def _default_filter_config(self):
+        return {
+            "precio": {
+                "kind": "numeric",
+                "label": "Precio",
+            },
+            "ambientes": {
+                "kind": "numeric",
+                "label": "Ambientes",
+            },
+            "area_m2_total": {
+                "kind": "numeric",
+                "label": "Metros cuadrados",
+            },
+            "pozo": {
+                "kind": "boolean",
+                "label": "En pozo",
+                "boolean_labels": {
+                    "all": "Todos",
+                    "true": "Solo en pozo",
+                    "false": "Solo no en pozo",
+                },
+            },
+            "quadrant": {
+                "kind": "categorical",
+                "label": "Cuadrante LISA",
+            },
+        }
+
+    def _default_popup_fields(self):
+        return [
+            "precio",
+            "precio_estimado",
+            "area_m2_total",
+            "ambientes",
+            "pozo",
+            "is_outlier",
+            "quadrant",
+            "p_value_z",
+            "p_value_lisa",
+            "url",
+        ]
 
     def _add_default_columns(self):
         self.map_df["is_outlier"] = self.map_df["is_outlier"].fillna(False)
-        self.map_df["combined_score"] = self.map_df["combined_score"].fillna(0.0)
         self.map_df["quadrant"] = self.map_df["quadrant"].fillna("N/D")
-        max_abs_score = float(
-            np.nanmax(np.abs(self.map_df["combined_score"].to_numpy()))
+        self.map_df["p_value_z"] = self._ensure_column(
+            "p_value_z",
+            np.nan,
         )
-        self._score_scale = max(max_abs_score, 1e-9)
+        self.map_df["p_value_lisa"] = self._ensure_column(
+            "p_value_lisa",
+            np.nan,
+        )
 
     def get_marker_style(self, row):
-        score = float(row.get("combined_score", 0.0) or 0.0)
-        intensity = min(abs(score) / self._score_scale, 1.0)
-        if score > 0:
-            color = self._lerp_color("#fecaca", "#991b1b", intensity)
-        elif score < 0:
-            color = self._lerp_color("#bfdbfe", "#1d4ed8", intensity)
-        else:
-            color = "#9ca3af"
+        p_value_z = pd.to_numeric(pd.Series([row.get("p_value_z")]), errors="coerce").iloc[0]
+        if pd.notna(p_value_z):
+            intensity = float(np.clip(1.0 - p_value_z, 0.0, 1.0))
+            color = self._lerp_color("#dbeafe", "#1d4ed8", intensity)
+            return {
+                "color": color,
+                "fillColor": color,
+                "radius": 3 + intensity * 5,
+                "fillOpacity": 0.35 + intensity * 0.55,
+                "weight": 0.6 + intensity * 0.8,
+            }
+        color = "#9ca3af"
         return {
             "color": color,
             "fillColor": color,
-            "radius": 3 + intensity * 5,
-            "fillOpacity": 0.75,
-            "weight": 0.8,
+            "radius": 2,
+            "fillOpacity": 0.35,
+            "weight": 0.5,
         }
 
     def get_tooltip(self, row):
-        score = row.get("combined_score")
+        p_z = row.get("p_value_z")
         precio = row.get("precio")
         quadrant = row.get("quadrant", "N/D")
-        score_txt = f"{score:.2f}" if pd.notna(score) else "N/D"
+        p_z_txt = f"{p_z:.3f}" if pd.notna(p_z) else "N/D"
         precio_txt = f"USD {precio:,.0f}" if pd.notna(precio) else "USD N/D"
-        return f"Score={score_txt} | {quadrant} | {precio_txt}"
+        return f"p_z={p_z_txt} | {quadrant} | {precio_txt}"
 
     def get_popup_html(self, row):
-        precio = row.get("precio")
-        area = row.get("area_m2_total")
-        ambientes = row.get("ambientes")
-        url = row.get("url")
-        score = row.get("combined_score")
-        quadrant = row.get("quadrant")
-        p_z = row.get("p_value_z")
-        p_lisa = row.get("p_value_lisa")
-
-        precio_txt = f"USD {precio:,.0f}" if pd.notna(precio) else "N/D"
-        area_txt = f"{area:,.0f} m²" if pd.notna(area) else "N/D"
-        ambientes_txt = f"{ambientes:,.0f}" if pd.notna(ambientes) else "N/D"
-        score_txt = f"{score:.2f}" if pd.notna(score) else "N/D"
-        quadrant_txt = quadrant if quadrant else "N/D"
-        p_z_txt = f"{p_z:.3f}" if pd.notna(p_z) else "N/D"
-        p_lisa_txt = f"{p_lisa:.3f}" if pd.notna(p_lisa) else "N/D"
-        link_html = f'<a href="{url}" target="_blank">Ver publicación</a>' if url else "Sin link"
-
-        return (
-            f"<b>Precio:</b> {precio_txt}<br>"
-            f"<b>Superficie:</b> {area_txt}<br>"
-            f"<b>Ambientes:</b> {ambientes_txt}<br>"
-            f"<b>Score combinado:</b> {score_txt}<br>"
-            f"<b>Outlier:</b> {'Sí' if bool(row.get('is_outlier')) else 'No'}<br>"
-            f"<b>Cuadrante LISA:</b> {quadrant_txt}<br>"
-            f"<b>P-value Z:</b> {p_z_txt}<br>"
-            f"<b>P-value LISA:</b> {p_lisa_txt}<br>"
-            f"{link_html}"
+        return "<br>".join(
+            self._render_popup_lines(
+                row,
+                self._resolved_popup_fields(),
+            )
         )
+
+    def _get_filter_panel_title(self):
+        return "Filtros Combined Z + LISA"
 
     def add_markers(self):
-        self._marker_registry = []
-        for _, row in self.map_df.iterrows():
-            style = self.get_marker_style(row)
-            marker = folium.CircleMarker(
-                location=[row["latitud"], row["longitud"]],
-                **style
-            )
-            marker.add_child(folium.Tooltip(self.get_tooltip(row)))
-            marker.add_child(folium.Popup(self.get_popup_html(row)))
-            marker.add_to(self.folium_map)
-
-            self._marker_registry.append(
-                {
-                    "marker_name": marker.get_name(),
-                    "precio": self._to_js_number(row.get("precio")),
-                    "ambientes": self._to_js_number(row.get("ambientes")),
-                    "area_m2_total": self._to_js_number(row.get("area_m2_total")),
-                    "quadrant": row.get("quadrant") if pd.notna(row.get("quadrant")) else "N/D",
-                }
-            )
-
-        self._add_filter_controls()
-
-    def _add_filter_controls(self):
-        if not self._marker_registry:
-            return
-
-        price_bounds = self._numeric_bounds("precio")
-        rooms_bounds = self._numeric_bounds("ambientes")
-        area_bounds = self._numeric_bounds("area_m2_total")
-        quadrants = sorted(
-            {
-                item["quadrant"]
-                for item in self._marker_registry
-                if item["quadrant"] not in (None, "")
-            }
-        )
-        map_name = self.folium_map.get_name()
-        registry_json = json.dumps(self._marker_registry, ensure_ascii=False)
-        quadrants_json = json.dumps(quadrants, ensure_ascii=False)
-
-        control_html = f"""
-        <div id="combined-z-lisa-filters" style="
-            position: fixed;
-            top: 16px;
-            right: 16px;
-            z-index: 9999;
-            width: 280px;
-            background: rgba(255, 255, 255, 0.96);
-            border: 1px solid #d1d5db;
-            border-radius: 12px;
-            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
-            padding: 14px 14px 12px 14px;
-            font-family: Arial, sans-serif;
-            color: #111827;
-        ">
-            <div style="font-size: 15px; font-weight: 700; margin-bottom: 10px;">Filtros Combined Z + LISA</div>
-            <div style="font-size: 12px; font-weight: 600; margin-bottom: 4px;">Precio</div>
-            <div style="display: flex; gap: 8px; margin-bottom: 10px;">
-                <input id="filter-precio-min" type="number" step="any" value="{price_bounds[0]}" style="width: 100%; padding: 6px;">
-                <input id="filter-precio-max" type="number" step="any" value="{price_bounds[1]}" style="width: 100%; padding: 6px;">
-            </div>
-            <div style="font-size: 12px; font-weight: 600; margin-bottom: 4px;">Ambientes</div>
-            <div style="display: flex; gap: 8px; margin-bottom: 10px;">
-                <input id="filter-ambientes-min" type="number" step="any" value="{rooms_bounds[0]}" style="width: 100%; padding: 6px;">
-                <input id="filter-ambientes-max" type="number" step="any" value="{rooms_bounds[1]}" style="width: 100%; padding: 6px;">
-            </div>
-            <div style="font-size: 12px; font-weight: 600; margin-bottom: 4px;">Metros cuadrados</div>
-            <div style="display: flex; gap: 8px; margin-bottom: 10px;">
-                <input id="filter-area-min" type="number" step="any" value="{area_bounds[0]}" style="width: 100%; padding: 6px;">
-                <input id="filter-area-max" type="number" step="any" value="{area_bounds[1]}" style="width: 100%; padding: 6px;">
-            </div>
-            <div style="font-size: 12px; font-weight: 600; margin-bottom: 4px;">Cuadrante LISA</div>
-            <div id="filter-quadrants" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-bottom: 12px;"></div>
-            <div style="display: flex; gap: 8px;">
-                <button id="apply-combined-filters" type="button" style="flex: 1; padding: 8px; border: 0; border-radius: 8px; background: #1d4ed8; color: white; cursor: pointer;">Aplicar</button>
-                <button id="reset-combined-filters" type="button" style="flex: 1; padding: 8px; border: 1px solid #cbd5e1; border-radius: 8px; background: white; cursor: pointer;">Reset</button>
-            </div>
-        </div>
-        """
-        script_html = f"""
-        <script>
-        (function() {{
-            function initializeCombinedZLisaFilters() {{
-                var missingMarkers = {registry_json}.some(function(item) {{
-                    return !window[item.marker_name];
-                }});
-                if (missingMarkers) {{
-                    window.setTimeout(initializeCombinedZLisaFilters, 120);
-                    return;
-                }}
-
-            var map = {map_name};
-            var markerRegistry = {registry_json};
-            var quadrants = {quadrants_json};
-            var priceBounds = {json.dumps(price_bounds)};
-            var roomsBounds = {json.dumps(rooms_bounds)};
-            var areaBounds = {json.dumps(area_bounds)};
-
-            var quadrantContainer = document.getElementById("filter-quadrants");
-            quadrantContainer.innerHTML = quadrants.map(function(q) {{
-                return '<label style="display:flex; align-items:center; gap:6px; font-size:12px;">'
-                    + '<input type="checkbox" class="quadrant-filter" value="' + q + '" checked>'
-                    + '<span>' + q + '</span>'
-                    + '</label>';
-            }}).join("");
-
-            function readNumber(id) {{
-                var raw = document.getElementById(id).value;
-                if (raw === "" || raw === null) return null;
-                var parsed = Number(raw);
-                return Number.isFinite(parsed) ? parsed : null;
-            }}
-
-            function selectedQuadrants() {{
-                return Array.from(document.querySelectorAll(".quadrant-filter:checked"))
-                    .map(function(el) {{ return el.value; }});
-            }}
-
-            function passesRange(value, minValue, maxValue) {{
-                if (value === null || value === undefined || Number.isNaN(value)) {{
-                    return false;
-                }}
-                if (minValue !== null && value < minValue) return false;
-                if (maxValue !== null && value > maxValue) return false;
-                return true;
-            }}
-
-            function applyFilters() {{
-                var precioMin = readNumber("filter-precio-min");
-                var precioMax = readNumber("filter-precio-max");
-                var ambientesMin = readNumber("filter-ambientes-min");
-                var ambientesMax = readNumber("filter-ambientes-max");
-                var areaMin = readNumber("filter-area-min");
-                var areaMax = readNumber("filter-area-max");
-                var selected = selectedQuadrants();
-
-                markerRegistry.forEach(function(item) {{
-                    var marker = window[item.marker_name];
-                    if (!marker) return;
-
-                    var visible = passesRange(item.precio, precioMin, precioMax)
-                        && passesRange(item.ambientes, ambientesMin, ambientesMax)
-                        && passesRange(item.area_m2_total, areaMin, areaMax)
-                        && (selected.length === 0 ? true : selected.includes(item.quadrant));
-
-                    var onMap = map.hasLayer(marker);
-                    if (visible && !onMap) {{
-                        marker.addTo(map);
-                    }} else if (!visible && onMap) {{
-                        map.removeLayer(marker);
-                    }}
-                }});
-            }}
-
-            function resetFilters() {{
-                document.getElementById("filter-precio-min").value = priceBounds[0];
-                document.getElementById("filter-precio-max").value = priceBounds[1];
-                document.getElementById("filter-ambientes-min").value = roomsBounds[0];
-                document.getElementById("filter-ambientes-max").value = roomsBounds[1];
-                document.getElementById("filter-area-min").value = areaBounds[0];
-                document.getElementById("filter-area-max").value = areaBounds[1];
-                document.querySelectorAll(".quadrant-filter").forEach(function(el) {{
-                    el.checked = true;
-                }});
-                applyFilters();
-            }}
-
-            document.getElementById("apply-combined-filters").addEventListener("click", applyFilters);
-            document.getElementById("reset-combined-filters").addEventListener("click", resetFilters);
-            applyFilters();
-            }}
-
-            if (document.readyState === "loading") {{
-                document.addEventListener("DOMContentLoaded", initializeCombinedZLisaFilters);
-            }} else {{
-                initializeCombinedZLisaFilters();
-            }}
-        }})();
-        </script>
-        """
-        self.folium_map.get_root().html.add_child(Element(control_html))
-        self.folium_map.get_root().html.add_child(Element(script_html))
-
-    def _numeric_bounds(self, column_name):
-        values = pd.to_numeric(self.map_df[column_name], errors="coerce")
-        values = values[np.isfinite(values)]
-        if values.empty:
-            return (0, 0)
-        return (float(values.min()), float(values.max()))
-
-    @staticmethod
-    def _to_js_number(value):
-        if pd.isna(value):
-            return None
-        return float(value)
+        OutlierMapVisualizer.add_markers(self)
 
     @staticmethod
     def _lerp_color(a, b, amount):

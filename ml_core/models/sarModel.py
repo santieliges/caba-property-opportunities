@@ -5,7 +5,13 @@ from sklearn.metrics import mean_squared_error
 from spreg import ML_Lag
 
 from .baseModel import BaseModel
-from ..preprocessing.knhs import KNHS
+from ..preprocessing.knhs import (
+    DistanceEdgeFeatureBuilder,
+    KNHSSchema,
+    NeighborGraphBuilder,
+    NeighborSearchCore,
+    TopKFeatureNeighborSelector,
+)
 
 
 class SpatialAutoregressiveModel(BaseModel):
@@ -27,6 +33,11 @@ class SpatialAutoregressiveModel(BaseModel):
 
         self.w = None
         self.model_ = None
+        self._neighbor_search_ = None
+        self._graph_builder_ = None
+        self._prepared_train_ = None
+        self._edge_index_train_ = None
+        self._edge_attr_train_ = None
 
     def _build_knhs_frame(self, X, coords):
         coords_arr = np.asarray(coords, dtype=float)
@@ -48,22 +59,38 @@ class SpatialAutoregressiveModel(BaseModel):
         graph_df["lon_deg"] = lon_deg
         return graph_df
 
-    def _build_knhs_builder(self):
-        return KNHS(
+    def _build_knhs_schema(self):
+        return KNHSSchema(
             lat_col="lat_deg",
             lon_col="lon_deg",
-            feature_cols=self.feature_names_,
-            weight_cols=None,
+            similarity_feature_cols=list(self.feature_names_),
+        )
+
+    def _build_neighbor_search(self):
+        return NeighborSearchCore(
+            schema=self._build_knhs_schema(),
             radius_km=self.radius_km,
             k=self.k,
-            distance="euclidean",
+            feature_distance_mode="euclidean",
+            neighbor_selector=TopKFeatureNeighborSelector(),
+        )
+
+    def _build_neighbor_graph_builder(self):
+        return NeighborGraphBuilder(
+            neighbor_search=self._build_neighbor_search(),
+            edge_feature_builder=DistanceEdgeFeatureBuilder(),
             add_reverse=True,
         )
 
     def _build_weights(self, X, coords):
-        builder = self._build_knhs_builder()
         graph_df = self._build_knhs_frame(X, coords)
-        edge_index, _ = builder.build(graph_df)
+        neighbor_search = self._build_neighbor_search()
+        graph_builder = self._build_neighbor_graph_builder()
+        prepared_train = neighbor_search.prepare(
+            graph_df,
+            expected_feature_cols=list(self.feature_names_),
+        )
+        edge_index, edge_attr = graph_builder.build_raw(prepared_train)
 
         neighbors = {i: [] for i in range(len(graph_df))}
         weights = {i: [] for i in range(len(graph_df))}
@@ -77,7 +104,11 @@ class SpatialAutoregressiveModel(BaseModel):
 
         w = W(neighbors, weights)
         w.transform = "r"
-        self._knhs_builder_ = builder
+        self._neighbor_search_ = neighbor_search
+        self._graph_builder_ = graph_builder
+        self._prepared_train_ = prepared_train
+        self._edge_index_train_ = edge_index
+        self._edge_attr_train_ = edge_attr
         self._graph_train_ = graph_df
         return w
 
@@ -154,10 +185,18 @@ class SpatialAutoregressiveModel(BaseModel):
             )
 
         graph_target = self._build_knhs_frame(X_o, coords_o)
-        _, edge_index, _, target_mask = self._knhs_builder_.build_cross_split(
-            self._graph_train_,
+        target_prepared = self._neighbor_search_.prepare(
             graph_target,
+            expected_feature_cols=self._prepared_train_.similarity_feature_cols,
         )
+        edge_index, _ = self._graph_builder_.build_cross_split_raw(
+            source_data=self._prepared_train_,
+            target_data=target_prepared,
+            source_edge_index=self._edge_index_train_,
+            source_edge_attr=self._edge_attr_train_,
+        )
+        target_mask = np.zeros(len(self._graph_train_) + len(graph_target), dtype=bool)
+        target_mask[len(self._graph_train_):] = True
         indices = self._target_neighbor_indices(
             edge_index=edge_index,
             target_offset=len(self._graph_train_),
@@ -206,10 +245,18 @@ class SpatialAutoregressiveModel(BaseModel):
             )
 
         graph_target = self._build_knhs_frame(X_o, coords_o)
-        _, edge_index, _, target_mask = self._knhs_builder_.build_cross_split(
-            self._graph_train_,
+        target_prepared = self._neighbor_search_.prepare(
             graph_target,
+            expected_feature_cols=self._prepared_train_.similarity_feature_cols,
         )
+        edge_index, _ = self._graph_builder_.build_cross_split_raw(
+            source_data=self._prepared_train_,
+            target_data=target_prepared,
+            source_edge_index=self._edge_index_train_,
+            source_edge_attr=self._edge_attr_train_,
+        )
+        target_mask = np.zeros(len(self._graph_train_) + len(graph_target), dtype=bool)
+        target_mask[len(self._graph_train_):] = True
         indices = self._target_neighbor_indices(
             edge_index=edge_index,
             target_offset=len(self._graph_train_),

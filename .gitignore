@@ -17,3 +17,12 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+
+# Portfolio artifacts
+!notebooks/output/
+!notebooks/output/12_rf_kriging/
+!notebooks/output/12_rf_kriging/outliers_oof/
+!notebooks/output/12_rf_kriging/outliers_oof/*.html
+!notebooks/output/13_gnn/
+!notebooks/output/13_gnn/outliers_oof/
+!notebooks/output/13_gnn/outliers_oof/*.html

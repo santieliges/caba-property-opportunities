@@ -1,6 +1,7 @@
-from .cleaningDataTransformers import (
+from .cleaning_data_transformers import (
     NormalizeStringsTransformer,
     FilterSmallBarriosTransformer,
+    FilterRequiredPositiveTransformer,
     AntiguedadImputer,
     EstadoImputer,
     RemoveOutliersTransformer,
@@ -13,7 +14,7 @@ from .cleaningDataTransformers import (
     NumericClipper,
 )
 
-from .featureEngeneeringTransfromers import (
+from .feature_engineering_transformers import (
     LogPrecioTransformer,
     DisposicionEncoder,
     EstadoOrdinalEncoder,
@@ -27,6 +28,7 @@ from .featureEngeneeringTransfromers import (
 __all__ = [
     "NormalizeStringsTransformer",
     "FilterSmallBarriosTransformer",
+    "FilterRequiredPositiveTransformer",
     "AntiguedadImputer",
     "EstadoImputer",
     "DisposicionEncoder",
