@@ -48,6 +48,15 @@ class SosivaApiClient:
             return SosivaResponse(status_code=response.status_code, url=url, text=response.text)
 
 
+def get_aviso_field_value(aviso: Dict[str, Any], field_path: str) -> Any:
+    value: Any = aviso
+    for part in field_path.split("."):
+        if not isinstance(value, dict):
+            return None
+        value = value.get(part)
+    return value
+
+
 def map_aviso_to_inmueble_fields(aviso: Dict[str, Any]) -> Dict[str, Any]:
     moneda = aviso.get("MonedaSimbolo_t")
     precio = aviso.get("MontoOperacion_i")
@@ -80,6 +89,9 @@ def map_aviso_to_inmueble_fields(aviso: Dict[str, Any]) -> Dict[str, Any]:
     orientacion = aviso.get("Orientacion_t")
     informacion_adicional = aviso.get("InformacionAdicional_t")
     pozo = detect_pozo(aviso)
+    fecha_publicacion_aviso_dt = aviso.get("FechaPublicacionAviso_dt")
+    fecha_modificacion_aviso_dt = aviso.get("FechaModificacionAviso_dt")
+    fecha_modificacion_puntos_dt = aviso.get("FechaModificacionPuntos_dt")
 
     return {
         "precio": precio,
@@ -101,6 +113,9 @@ def map_aviso_to_inmueble_fields(aviso: Dict[str, Any]) -> Dict[str, Any]:
         "longitud": lon,
         "informacion_adicional": informacion_adicional,
         "pozo": pozo,
+        "fecha_publicacion_aviso_dt": fecha_publicacion_aviso_dt,
+        "fecha_modificacion_aviso_dt": fecha_modificacion_aviso_dt,
+        "fecha_modificacion_puntos_dt": fecha_modificacion_puntos_dt,
     }
 
 

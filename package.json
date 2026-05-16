@@ -1,9 +1,12 @@
 {
-  "name": "predictorpreciometrocuadradoalquileres",
+  "name": "caba-property-opportunities",
   "version": "1.0.0",
-  "description": "Modelo espacial para estimar el precio por m² de alquiler usando kernel geográfico y regresión.",
-  "main": "index.js",
-  "scripts": {},
+  "description": "Proyecto end-to-end de scraping, modelado espacial y deteccion de oportunidades inmobiliarias en CABA.",
+  "private": true,
+  "scripts": {
+    "playwright:install": "playwright install --with-deps",
+    "playwright:test": "playwright test --config=scraper_service/playwright.config.ts"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/santieliges/PredictorPrecioMetroCuadradoAlquileres.git"

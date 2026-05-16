@@ -54,6 +54,10 @@ class Storage(ABC):
     def dropna(self, column):
         pass
 
+    @abstractmethod
+    def patch_active(self, entry_id, updates: dict):
+        pass
+
 
 DTYPES = {
     "id": "Int64",
@@ -68,6 +72,9 @@ DTYPES = {
     "pozo": "Int64",
     "latitud": "Float64",
     "longitud": "Float64",
+    "fecha_publicacion_aviso_dt": "string",
+    "fecha_modificacion_aviso_dt": "string",
+    "fecha_modificacion_puntos_dt": "string",
 }
 
 
@@ -172,3 +179,12 @@ class CSVStorage(Storage):
 
     def dropna(self, column):
         self.df = self.df.dropna(subset=[column])
+
+    def patch_active(self, entry_id, updates: dict):
+        mask = (self.df["id"] == entry_id) & (self.df["valido_hasta"].isna())
+        if not mask.any():
+            raise ValueError(f"No existe registro activo para id={entry_id}")
+
+        normalized_updates = self._normalize_entry(updates.copy())
+        for column, value in normalized_updates.items():
+            self.df.loc[mask, column] = value

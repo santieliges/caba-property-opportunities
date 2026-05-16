@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+from pathlib import Path
 from typing import Tuple, Union
 
 from patchright.async_api import async_playwright
@@ -19,16 +20,34 @@ class BaseScraper:
         self.page = None
         self.detail_page = None
 
-        os.makedirs("storage", exist_ok=True)
-        self.storage_state_path = os.path.join(
-            "storage",
-            f"playwright_state_{self.__class__.__name__}.json",
+        storage_dir = Path(
+            os.getenv("SCRAPER_STORAGE_DIR", "storage")
         )
+        user_data_dir = Path(
+            os.getenv(
+                "PLAYWRIGHT_USER_DATA_DIR",
+                f"playwright_user_data_{self.__class__.__name__}",
+            )
+        )
+
+        storage_dir.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+        user_data_dir.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        self.storage_state_path = str(
+            storage_dir / f"playwright_state_{self.__class__.__name__}.json"
+        )
+        self.user_data_dir = str(user_data_dir)
 
     async def start(self):
         self.playwright = await async_playwright().start()
         launch_options = {
-            "user_data_dir": f"playwright_user_data_{self.__class__.__name__}",
+            "user_data_dir": self.user_data_dir,
             "headless": self.headless,
             "no_viewport": True,
         }

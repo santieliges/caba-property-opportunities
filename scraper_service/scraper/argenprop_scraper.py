@@ -4,6 +4,7 @@ import random
 import re
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 import requests
@@ -14,6 +15,10 @@ from scraper_service.scraper.SosivaApiClient import (
     map_aviso_to_inmueble_fields,
     detect_pozo,
 )
+
+
+SCRAPER_SERVICE_ROOT = Path(__file__).resolve().parents[1]
+SCRAPE_DEBUG_DIR = SCRAPER_SERVICE_ROOT / "output" / "scrape_debug"
 
 
 @dataclass
@@ -40,6 +45,9 @@ class InmuebleData:
     longitud: Optional[float] = None
     informacion_adicional: Optional[str] = None
     pozo: Optional[int] = None
+    fecha_publicacion_aviso_dt: Optional[str] = None
+    fecha_modificacion_aviso_dt: Optional[str] = None
+    fecha_modificacion_puntos_dt: Optional[str] = None
     image_url: Optional[str] = None
     imagen_path: Optional[str] = None
 
@@ -257,17 +265,17 @@ class ArgenPropScraper(BaseScraper):
                     continue
 
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                os.makedirs("output/scrape_debug", exist_ok=True)
+                SCRAPE_DEBUG_DIR.mkdir(parents=True, exist_ok=True)
                 try:
                     await self.page.screenshot(
-                        path=f"output/scrape_debug/list_{ts}.png",
+                        path=str(SCRAPE_DEBUG_DIR / f"list_{ts}.png"),
                         full_page=True,
                     )
                 except Exception:
                     pass
                 try:
                     html = await self.page.content()
-                    with open(f"output/scrape_debug/list_{ts}.html", "w", encoding="utf-8") as file:
+                    with open(SCRAPE_DEBUG_DIR / f"list_{ts}.html", "w", encoding="utf-8") as file:
                         file.write(html)
                 except Exception:
                     pass

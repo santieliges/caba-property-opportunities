@@ -63,7 +63,7 @@ Si querés entender el proyecto rápido, este es el orden recomendado:
 1. [`README.md`](README.md)
 2. [`CASE_STUDY.md`](CASE_STUDY.md)
 3. [`notebooks/12_rf_kriging.ipynb`](notebooks/12_rf_kriging.ipynb)
-4. [`notebooks/output/12_rf_kriging/outliers_oof/combined_z_lisa_interactive_map.html`](notebooks/output/12_rf_kriging/outliers_oof/combined_z_lisa_interactive_map.html)
+4. [`notebooks/output/12_rf_kriging/outliers_oof/z_test_interactive_map.html`](notebooks/output/12_rf_kriging/outliers_oof/z_test_interactive_map.html)
 
 ## Estructura del repo
 
@@ -75,6 +75,9 @@ Si querés entender el proyecto rápido, este es el orden recomendado:
 
 ## Otros experimentos
 
+- [`notebooks/00_data_overview.ipynb`](notebooks/00_data_overview.ipynb): overview inicial del dataset, distribución del target, filtro analítico y primeros mapas descriptivos.
+- [`notebooks/01_spatial_dependence.ipynb`](notebooks/01_spatial_dependence.ipynb): diagnóstico de dependencia espacial con Moran, variograma, densidad local y heterogeneidad por barrio.
+- [`notebooks/02_days_on_market_analysis.ipynb`](notebooks/02_days_on_market_analysis.ipynb): análisis territorial de `days on market`, y analisis e la demanda en función de las ventas registradas.
 - [`notebooks/11_sar.ipynb`](notebooks/11_sar.ipynb): modelo SAR
 - [`notebooks/13_gnn.ipynb`](notebooks/13_gnn.ipynb): línea de trabajo con `TGNN`
 - [`notebooks/13_gnn_simulation_ideal_data.ipynb`](notebooks/13_gnn_simulation_ideal_data.ipynb): sanity checks sobre datos sintéticos

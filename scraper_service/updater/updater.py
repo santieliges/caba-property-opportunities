@@ -33,7 +33,7 @@ class Updater:
 
         print(f"Update page fallback for {entry_id}: api_status={api_res.status_code}" )
         detail = await argenprop_scraper.extract_detail_data(url)
-        print(f"Update page fallback for {entry_id}, antiguedad: {detail.get('antiguedad')}, pozo: {detail.get('pozo')}")
+        print(f"Update page fallback for {entry_id}: extracted detail")
         return InmuebleData(
             id=entry_id,
             url=url,

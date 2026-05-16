@@ -2,6 +2,17 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Python: update_data",
+            "type": "debugpy",
+            "request": "launch",
+            "purpose": ["debug-in-terminal"],
+            "module": "scraper_service.update_data",
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "stopOnEntry": true,
+            "console": "integratedTerminal"
+        },
+        {
             "name": "Python: Remote Attach",
             "type": "debugpy",
             "request": "attach",

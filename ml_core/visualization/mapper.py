@@ -1067,6 +1067,7 @@ class ZTestMapVisualizer(OutlierMapVisualizer):
         results_df,
         barrios_path=None,
         *,
+        significance_alpha=0.05,
         filter_config=None,
         popup_fields=None,
         popup_field_config=None,
@@ -1081,6 +1082,7 @@ class ZTestMapVisualizer(OutlierMapVisualizer):
             popup_fields=popup_fields,
             popup_field_config=popup_field_config,
         )
+        self.significance_alpha = float(significance_alpha)
 
     def _default_filter_config(self):
         return {
@@ -1096,9 +1098,9 @@ class ZTestMapVisualizer(OutlierMapVisualizer):
                 "kind": "numeric",
                 "label": "Metros cuadrados",
             },
-            "is_outlier": {
+            "is_significant_outlier": {
                 "kind": "boolean",
-                "label": "Tipo de punto",
+                "label": f"Atípico (p ≤ {self.significance_alpha:.2f})",
                 "boolean_labels": {
                     "all": "Todos",
                     "true": "Solo atípicos",
@@ -1138,7 +1140,6 @@ class ZTestMapVisualizer(OutlierMapVisualizer):
             "is_outlier",
             False,
         ).fillna(False)
-        self.map_df["es_atipico_ztest"] = self.map_df["is_outlier"]
         self.map_df["tipo_valor_atipico"] = self._ensure_column(
             "tipo_valor_atipico",
             "NO_ATIPICO",
@@ -1155,6 +1156,12 @@ class ZTestMapVisualizer(OutlierMapVisualizer):
             "p_value",
             np.nan,
         )
+        p_values = pd.to_numeric(self.map_df["p_value"], errors="coerce")
+        self.map_df["is_significant_outlier"] = (
+            np.isfinite(p_values.to_numpy())
+            & (p_values.to_numpy() <= self.significance_alpha)
+        )
+        self.map_df["es_atipico_ztest"] = self.map_df["is_significant_outlier"]
 
     def get_marker_style(self, row):
         p_value = pd.to_numeric(pd.Series([row.get("p_value")]), errors="coerce").iloc[0]

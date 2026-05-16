@@ -4,11 +4,23 @@ __pycache__/
 .venv/
 venv/
 .ipynb_checkpoints/
+notebooks/venv/
+scraper_service/.venv/
+scraper_service/.pytest_cache/
 output/
 *.csv
 !data/**/.gitkeep
-update_data_scraper.log
+*.log
+.~lock.*
 playwright_user_data_*/
+scraper_service/playwright_user_data_*/
+scraper_service/storage/playwright_state_*.json
+images/
+tmp/
+storage/
+notebooks/cache/
+notebooks/notebooks/cache/
+ml_core/preprocessing/artifacts/*.joblib
 
 # Playwright
 node_modules/
@@ -17,12 +29,3 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
-
-# Portfolio artifacts
-!notebooks/output/
-!notebooks/output/12_rf_kriging/
-!notebooks/output/12_rf_kriging/outliers_oof/
-!notebooks/output/12_rf_kriging/outliers_oof/*.html
-!notebooks/output/13_gnn/
-!notebooks/output/13_gnn/outliers_oof/
-!notebooks/output/13_gnn/outliers_oof/*.html
