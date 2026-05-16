@@ -68,6 +68,71 @@ PIPELINE_PATH = (
 )
 
 
+def _deduplicate_latest_by_listing_id(
+    df: pd.DataFrame,
+    *,
+    id_col: str = "id",
+    valid_from_col: str = "valido_desde",
+) -> pd.DataFrame:
+    """Keep only the latest snapshot for each listing id before splitting.
+
+    The raw scraper dataset is historized, so the same publication can appear
+    many times with different prices or states. Splitting by row would leak
+    near-duplicate versions of the same listing across train/val/test.
+    """
+
+    if id_col not in df.columns:
+        return df.copy()
+
+    working_df = df.copy()
+    working_df["__original_order__"] = range(len(working_df))
+
+    id_series = working_df[id_col]
+    rows_without_id = working_df.loc[id_series.isna()].copy()
+    rows_with_id = working_df.loc[id_series.notna()].copy()
+
+    if rows_with_id.empty:
+        return (
+            working_df
+            .drop(columns="__original_order__")
+            .reset_index(drop=True)
+        )
+
+    if valid_from_col in rows_with_id.columns:
+        rows_with_id["__valid_from_dt__"] = pd.to_datetime(
+            rows_with_id[valid_from_col],
+            errors="coerce",
+        )
+        sort_columns = [id_col, "__valid_from_dt__", "__original_order__"]
+    else:
+        sort_columns = [id_col, "__original_order__"]
+
+    latest_rows = (
+        rows_with_id
+        .sort_values(sort_columns, na_position="first")
+        .drop_duplicates(subset=[id_col], keep="last")
+    )
+
+    deduplicated = pd.concat(
+        [latest_rows, rows_without_id],
+        axis=0,
+        ignore_index=True,
+    )
+
+    helper_columns = [
+        column_name
+        for column_name in ["__original_order__", "__valid_from_dt__"]
+        if column_name in deduplicated.columns
+    ]
+
+    return (
+        deduplicated
+        .sort_values("__original_order__")
+        .drop(columns=helper_columns)
+        .reset_index(drop=True)
+    )
+
+
 def _save_processed_splits(
     split_frames: dict[str, pd.DataFrame],
     *,
@@ -131,6 +196,9 @@ def process_dataset(
 
     df_raw = pd.read_csv(input_path)
     print("Filas originales:", len(df_raw))
+
+    df_raw = _deduplicate_latest_by_listing_id(df_raw)
+    print("Filas luego de deduplicar por ultimo estado de cada id:", len(df_raw))
 
     raw_splits = split_dataframe(
         df_raw,
