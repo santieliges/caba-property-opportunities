@@ -109,6 +109,41 @@ Salida esperada:
 - si no se pasa URL al wrapper Docker, usa por default
   `http://argenprop.com/departamentos/venta/capital-federal?orden-masnuevos`
 
+### Automatizacion con cron
+
+Instalar o reinstalar el bloque administrado de `cron`:
+
+```bash
+./scraper_service/scripts/install_cron_jobs.sh
+```
+
+Schedules default del bloque administrado:
+- `0 0 * * *` para `update_data`
+- `0 3 * * *` para `sync_daily_new_listings`
+
+Los wrappers de `cron`:
+- no usan TTY
+- evitan corridas superpuestas con `flock`
+- escriben logs en `scraper_service/logs/cron/`
+- dejan estado legible en archivos `*.state`, `*.last_start`, `*.last_end`,
+  `*.last_success` y `*.last_exit`
+
+Ver estado operativo:
+
+```bash
+./scraper_service/scripts/show_cron_status.sh
+tail -f scraper_service/logs/cron/update_data.log
+tail -f scraper_service/logs/cron/sync_daily_new_listings.log
+```
+
+Si queres cambiar horarios al instalar:
+
+```bash
+UPDATE_SCHEDULE="30 0 * * *" \
+SYNC_SCHEDULE="0 4 * * *" \
+./scraper_service/scripts/install_cron_jobs.sh
+```
+
 ## Contratos e invariantes
 
 - El id canonico del aviso es el id de Argenprop.

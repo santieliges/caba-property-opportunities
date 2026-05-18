@@ -22,6 +22,20 @@ Responsabilidad:
 - en `run_sync_daily_new_listings_docker.sh`, usar una URL default de
   Capital Federal ordenada por mas nuevos cuando no se pasa argumento
 
+### Wrappers cron
+
+- [run_update_data_cron.sh](/home/saneliges/Escritorio/caba-property-opportunities/scraper_service/scripts/run_update_data_cron.sh)
+- [run_sync_daily_new_listings_cron.sh](/home/saneliges/Escritorio/caba-property-opportunities/scraper_service/scripts/run_sync_daily_new_listings_cron.sh)
+- [install_cron_jobs.sh](/home/saneliges/Escritorio/caba-property-opportunities/scraper_service/scripts/install_cron_jobs.sh)
+- [show_cron_status.sh](/home/saneliges/Escritorio/caba-property-opportunities/scraper_service/scripts/show_cron_status.sh)
+
+Responsabilidad:
+- ejecutar los jobs sin TTY para que funcionen bajo `cron`
+- evitar solapamientos con `flock`
+- escribir logs operativos en `scraper_service/logs/cron/`
+- persistir marcadores `state`, `last_start`, `last_end`, `last_success` y `last_exit`
+- instalar un bloque administrado de `crontab` con schedules configurables
+
 ### Utilidades de datos
 
 - [backfill_fecha_publicacion_aviso.py](/home/saneliges/Escritorio/caba-property-opportunities/scraper_service/scripts/backfill_fecha_publicacion_aviso.py)
@@ -62,3 +76,5 @@ No editar esta carpeta para:
 - Algunos scripts de prueba aun conservan nombres viejos como
   `test_scrape_new_data_*`. Documentan flujo legacy y pueden requerir
   alineacion futura con los entrypoints nuevos.
+- Los wrappers `*_docker.sh` usan `-it` y son adecuados para ejecucion manual.
+  Para `cron`, usar `*_cron.sh`.

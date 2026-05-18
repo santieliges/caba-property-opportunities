@@ -11,6 +11,7 @@ output/
 *.csv
 !data/**/.gitkeep
 *.log
+scraper_service/logs/
 .~lock.*
 playwright_user_data_*/
 scraper_service/playwright_user_data_*/
