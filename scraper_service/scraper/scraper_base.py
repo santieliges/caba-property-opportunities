@@ -20,13 +20,14 @@ class BaseScraper:
         self.page = None
         self.detail_page = None
 
-        storage_dir = Path(
-            os.getenv("SCRAPER_STORAGE_DIR", "storage")
+        runtime_dir = Path(
+            os.getenv("SCRAPER_RUNTIME_DIR", "/tmp/caba-property-opportunities")
         )
+        storage_dir = Path(os.getenv("SCRAPER_STORAGE_DIR", "storage"))
         user_data_dir = Path(
             os.getenv(
                 "PLAYWRIGHT_USER_DATA_DIR",
-                f"playwright_user_data_{self.__class__.__name__}",
+                str(runtime_dir / f"playwright_user_data_{self.__class__.__name__}"),
             )
         )
 
@@ -54,11 +55,12 @@ class BaseScraper:
         if self.browser_channel:
             launch_options["channel"] = self.browser_channel
 
-        self.browser = await self.playwright.chromium.launch_persistent_context(
+        self.context = await self.playwright.chromium.launch_persistent_context(
             **launch_options,
         )
-        self.page = await self.browser.new_page()
-        self.detail_page = await self.browser.new_page()
+        self.browser = self.context
+        self.page = await self.context.new_page()
+        self.detail_page = await self.context.new_page()
         self.page.on("popup", lambda p: asyncio.create_task(self._close_popup(p)))
         self.detail_page.on("popup", lambda p: asyncio.create_task(self._close_popup(p)))
 

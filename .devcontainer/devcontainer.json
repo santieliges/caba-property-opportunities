@@ -3,7 +3,12 @@
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
 	"build": {
 		"dockerfile": "../scraper_service/Dockerfile",
-		"context": ".."
+		"context": "../scraper_service"
+	},
+
+	"containerEnv": {
+		"PLAYWRIGHT_USER_DATA_DIR": "/runtime/playwright-user-data",
+		"SCRAPER_STORAGE_DIR": "/runtime/storage"
 	}
 
 	// Features to add to the dev container. More info: https://containers.dev/features.

@@ -6,7 +6,7 @@ from scraper_service.scraper.SosivaApiClient import (
     map_aviso_to_inmueble_fields,
 )
 
-
+## por ahora esta clase es un wrapper de SosivaApiClient, pero la idea es que pueda implementar otras estrategias de actualización (ej: scraping directo) y decidir cuál usar según el caso (ej: si el aviso tiene url o no, o según el error que devuelva la API)
 class Updater:
     def __init__(self):
         self.sosiva_api = SosivaApiClient()

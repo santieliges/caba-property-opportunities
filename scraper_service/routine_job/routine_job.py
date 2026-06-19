@@ -1,13 +1,15 @@
 import asyncio
 import logging
 import random
-
+import numpy as np
 from scraper_service.scraper import BaseScraper
 from scraper_service.storage.storage import Storage
 from scraper_service.sync.sync import Synchronizer
 from scraper_service.updater.updater import Updater
+from scraper_service.updater.samplers import RandomSampler, PoissonSampler, NormalSampler
 
 logger = logging.getLogger(__name__)
+
 
 
 class RoutineJob:
@@ -19,9 +21,8 @@ class RoutineJob:
 
     async def fetch_and_sync_data(
         self,
-        batch_size: int = 1000,
-        delay_s: float = 0.0,
-        jitter_s: float = 0.0,
+        batch_size_sampler: RandomSampler = PoissonSampler(lam=300),
+        batch_delay_sampler: RandomSampler = NormalSampler(mean=35.0, std=5.0),
         max_entries: int | None = None,
         max_concurrency: int = 10,
     ):
@@ -49,22 +50,27 @@ class RoutineJob:
         failed = 0
         closed = 0
 
-        def chunk_iter(iterable, size):
-            it = iter(iterable)
-            while True:
-                block = []
-                for _ in range(size):
-                    try:
-                        block.append(next(it))
-                    except StopIteration:
-                        break
-                if not block:
-                    break
-                yield block
-
         total = len(data)
         entries = list(enumerate(data.iterrows(), start=1))
-        for block in chunk_iter(entries, batch_size):
+        entries_it = iter(entries)
+
+        while True:
+            # muestrea el tamaño del batch (devuelve array de longitud 1)
+            bs_arr = batch_size_sampler.sample(1)
+            batch_size = int(np.asarray(bs_arr).ravel()[0])
+            if batch_size < 1:
+                batch_size = 1
+
+            # construir bloque dinámico
+            block = []
+            for _ in range(batch_size):
+                try:
+                    block.append(next(entries_it))
+                except StopIteration:
+                    break
+            if not block:
+                break
+
             tasks = []
             for entry_pos, (entry_idx, row) in block:
                 entry_id = row.get("id")
@@ -109,8 +115,11 @@ class RoutineJob:
             logger.info("[RoutineJob] Guardando batch (%s registros procesados, %s cerrados)", processed, closed)
             self.storage.save()
 
-            if delay_s or jitter_s:
-                await asyncio.sleep(delay_s + (random.random() * jitter_s))
+            # muestrea delay entre batches
+            delay_arr = batch_delay_sampler.sample(1)
+            delay_s = float(np.asarray(delay_arr).ravel()[0])
+            if delay_s > 0:
+                await asyncio.sleep(delay_s)
 
         await self.scraper.close()
         logger.info(

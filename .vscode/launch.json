@@ -10,7 +10,11 @@
             "cwd": "${workspaceFolder}",
             "python": "${workspaceFolder}/.venv/bin/python",
             "stopOnEntry": true,
-            "console": "integratedTerminal"
+            "console": "integratedTerminal",
+            "env": {
+                "PLAYWRIGHT_USER_DATA_DIR": "/runtime/playwright-user-data",
+                "SCRAPER_STORAGE_DIR": "/runtime/storage"
+            }
         },
         {
             "name": "Python: Remote Attach",

@@ -14,4 +14,4 @@ pykrige==1.7.3
 jupyterlab==4.4.10
 notebook==7.4.7
 torch>=2.2.0,<3.0
-osmnx==1.1.2
+osmnx==2.0.6

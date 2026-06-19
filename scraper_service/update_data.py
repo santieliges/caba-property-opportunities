@@ -1,9 +1,14 @@
 import asyncio
 import logging
 import os
+import sys
 from pathlib import Path
 
 import pandas as pd
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from scraper_service.routine_job.routine_job import RoutineJob
 from scraper_service.scraper.SosivaApiClient import SosivaApiClient, get_aviso_field_value
@@ -11,9 +16,9 @@ from scraper_service.scraper.argenprop_scraper import ArgenPropScraper
 from scraper_service.storage.storage import CSVStorage
 from scraper_service.sync.sync import Synchronizer
 from scraper_service.updater.updater import Updater
+from scraper_service.updater.samplers import PoissonSampler, NormalSampler
 
 logger = logging.getLogger(__name__)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT_DIR = Path(__file__).resolve().parent
 RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw"
 LOG_PATH = SCRIPT_DIR / "update_data_scraper.log"
@@ -49,8 +54,6 @@ async def run_argenprop_job(
     csv_path: str,
     url_base: str,
     updater: Updater,
-    delay_s: float = 0.0,
-    jitter_s: float = 0.0,
 ):
     logger.info("Iniciando job ArgenProp. csv_path=%s", csv_path)
     storage = CSVStorage(csv_path)
@@ -69,9 +72,8 @@ async def run_argenprop_job(
     )
 
     result = await job.fetch_and_sync_data(
-        batch_size=100,
-        delay_s=delay_s,
-        jitter_s=jitter_s,
+        batch_size_sampler=PoissonSampler(lam=10),
+        batch_delay_sampler=NormalSampler(mean=10.0, std=5.0),
     )
     logger.info("Job ArgenProp finalizado. csv_path=%s result=%s", csv_path, result)
 
@@ -153,8 +155,6 @@ async def main():
         csv_path=str(RAW_DATA_DIR / "arg_venta_data.csv"),
         url_base="https://www.argenprop.com",
         updater=updater,
-        delay_s=1,
-        jitter_s=3,
     )
 
 
