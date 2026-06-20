@@ -10,10 +10,27 @@
 		"ghcr.io/devcontainers/features/node":
 		{"version": "lts"}
 	},
-	
+	"forwardPorts": [6080],
+	"portsAttributes": {
+		"6080": {
+			"label": "Container desktop (noVNC)",
+			"onAutoForward": "openBrowser"
+		}
+	},
+
 	"containerEnv": {
 		"PLAYWRIGHT_USER_DATA_DIR": "/runtime/playwright-user-data",
 		"SCRAPER_STORAGE_DIR": "/runtime/storage"
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-python.python",
+				"ms-python.debugpy",
+				"ms-python.vscode-pylance",
+				"ms-python.vscode-python-envs"
+			]
+		}
 	}
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
