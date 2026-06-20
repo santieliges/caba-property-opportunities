@@ -27,8 +27,8 @@ class RoutineJob:
 
     async def fetch_and_sync_data(
         self,
-        batch_size_sampler: RandomSampler = PoissonSampler(lam=300),
-        batch_delay_sampler: RandomSampler = NormalSampler(mean=35.0, std=5.0),
+        batch_size_sampler: RandomSampler = PoissonSampler(lam=2),
+        batch_delay_sampler: RandomSampler = NormalSampler(mean=15.0, std=5.0),
         max_entries: int | None = None,
         max_concurrency: int = 10,
     ):

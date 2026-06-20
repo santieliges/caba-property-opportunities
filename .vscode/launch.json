@@ -17,6 +17,35 @@
             }
         },
         {
+            "name": "Python: archivo activo",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "cwd": "${workspaceFolder}",
+            "python": "${command:python.interpreterPath}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Python: pytest archivo activo",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "${file}",
+                "-s",
+                "-vv"
+            ],
+            "cwd": "${workspaceFolder}",
+            "python": "${command:python.interpreterPath}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PLAYWRIGHT_USER_DATA_DIR": "/runtime/playwright-user-data",
+                "SCRAPER_STORAGE_DIR": "/runtime/storage"
+            }
+        },
+        {
             "name": "Python: Remote Attach",
             "type": "debugpy",
             "request": "attach",
