@@ -10,6 +10,8 @@ from scraper_service.scraper.argenprop_scraper import ArgenPropScraper
 from scraper_service.storage.storage import CSVStorage
 from scraper_service.sync.sync import Synchronizer
 from scraper_service.updater.updater import Updater
+from scraper_service.updater.dataSource import ScrappingDataSource
+from scraper_service.updater.samplers import NormalSampler, PoissonSampler
 
 
 def test_single_department_update_flow(tmp_path):
@@ -25,18 +27,28 @@ def test_single_department_update_flow(tmp_path):
     )
 
     scraper = ArgenPropScraper(
-        headless=True,
+        headless=False,
         url_base="https://www.argenprop.com",
         download_images=False,
+        use_api_details=False,
     )
-    updater = Updater()
     sync = Synchronizer(storage=storage)
+    updater = Updater(
+        synchronizer=sync,
+        data_source=ScrappingDataSource(scraper),
+    )
     job = RoutineJob(storage=storage, scraper=scraper, updater=updater, synchronizer=sync)
 
-    try:
-        asyncio.run(job.fetch_and_sync_data(batch_size=1, delay_s=0, jitter_s=0, max_entries=1))
-    finally:
-        asyncio.run(scraper.close())
+    result = asyncio.run(
+        job.fetch_and_sync_data(
+            batch_size_sampler=PoissonSampler(lam=1),
+            batch_delay_sampler=NormalSampler(mean=0, std=0),
+            max_entries=1,
+            max_concurrency=1,
+        )
+    )
+
+    assert result == {"processed": 1, "closed": 0, "failed": 0, "total": 1}
 
     updated = storage.get_by_id(entry_id)
     assert updated is not None, "El registro no quedó en el storage después del update."

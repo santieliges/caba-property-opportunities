@@ -8,6 +8,13 @@ from patchright.async_api import async_playwright
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 
+class ScraperHTTPError(Exception):
+    def __init__(self, status_code: int, url: str):
+        self.status_code = status_code
+        self.url = url
+        super().__init__(f"HTTP {status_code} al acceder a {url}")
+
+
 class BaseScraper:
     def __init__(self, url_base: str, headless: bool = True):
         self.url_base = url_base

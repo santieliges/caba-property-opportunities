@@ -8,7 +8,6 @@ from scraper_service.routine_job.routine_job import RoutineJob
 from scraper_service.scraper.argenprop_scraper import ArgenPropScraper
 from scraper_service.storage.storage import CSVStorage
 from scraper_service.sync.sync import Synchronizer
-from scraper_service.updater.updater import Updater
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw"
@@ -58,16 +57,14 @@ async def run_job(
     }
 
     scraper = ArgenPropScraper(
-        headless=env_flag("HEADLESS", True),
+        headless=env_flag("HEADLESS", False),
         url_base=url,
         download_images=False,
     )
     sync = Synchronizer(storage=storage)
-    updater = Updater()
     job = RoutineJob(
         storage=storage,
         scraper=scraper,
-        updater=updater,
         synchronizer=sync,
     )
 

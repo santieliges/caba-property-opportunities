@@ -9,7 +9,7 @@ from typing import Optional
 
 import requests
 
-from scraper_service.scraper.scraper_base import BaseScraper
+from scraper_service.scraper.scraper_base import BaseScraper, ScraperHTTPError
 from scraper_service.scraper.SosivaApiClient import (
     SosivaApiClient,
     map_aviso_to_inmueble_fields,
@@ -167,10 +167,12 @@ class ArgenPropScraper(BaseScraper):
         return listings
 
     async def extract_detail_data(self, url):
-        await self.detail_page.goto(url)
+        response = await self.detail_page.goto(url)
         if await self._looks_like_human_check(self.detail_page):
             await self._pause_for_human_check(self.detail_page, url)
-            await self.detail_page.goto(url)
+            response = await self.detail_page.goto(url)
+        if response is not None and response.status >= 400:
+            raise ScraperHTTPError(response.status, url)
         await self.detail_page.wait_for_timeout(2000)
 
         precio, moneda, expensas = await self.extract_price_and_expenses()

@@ -1,43 +1,65 @@
 import asyncio
+import logging
 
-from scraper_service.scraper.argenprop_scraper import InmuebleData
-from scraper_service.scraper.SosivaApiClient import (
-    SosivaApiClient,
-    map_aviso_to_inmueble_fields,
-)
+from scraper_service.sync.sync import Synchronizer
+from scraper_service.updater.dataSource import DataSource
 
-## por ahora esta clase es un wrapper de SosivaApiClient, pero la idea es que pueda implementar otras estrategias de actualización (ej: scraping directo) y decidir cuál usar según el caso (ej: si el aviso tiene url o no, o según el error que devuelva la API)
+logger = logging.getLogger(__name__)
+
+
 class Updater:
-    def __init__(self):
-        self.sosiva_api = SosivaApiClient()
+    """Actualiza y sincroniza avisos."""
 
-    async def fetch(self, entry_id, entry, argenprop_scraper):
-        url = entry.get("url")
-        if not url:
-            return None
+    def __init__(self, synchronizer: Synchronizer, data_source: DataSource):
+        self.synchronizer = synchronizer
+        self.data_source = data_source
 
-        api_res = await asyncio.to_thread(self.sosiva_api.get_aviso, int(entry_id))
-        if api_res.status_code == 200 and api_res.json_data:
-            detail = map_aviso_to_inmueble_fields(api_res.json_data)
-            print(f"Update API for {entry_id}")
-            return InmuebleData(
-                id=entry_id,
-                url=url,
-                image_url=entry.get("image_url"),
-                imagen_path=entry.get("imagen_path"),
-                **detail,
-            ).to_dict()
+    async def sync_data(self, entry_id, entry):
+        """Obtiene el estado actual de un aviso y lo sincroniza."""
+        new_entry, status_code = await self.data_source.fetch(entry_id, entry)
 
-        if api_res.status_code in (404, 410):
+        if status_code == 200 and new_entry is not None:
+            self.synchronizer.sync_entry(entry_id, new_entry)
+            return new_entry
+
+        if status_code in (404, 410):
+            self.synchronizer.sync_entry(entry_id, None)
             return 410
 
-        print(f"Update page fallback for {entry_id}: api_status={api_res.status_code}" )
-        detail = await argenprop_scraper.extract_detail_data(url)
-        print(f"Update page fallback for {entry_id}: extracted detail")
-        return InmuebleData(
-            id=entry_id,
-            url=url,
-            image_url=entry.get("image_url"),
-            imagen_path=entry.get("imagen_path"),
-            **detail,
-        ).to_dict()
+        logger.warning(
+            "No se pudo actualizar entry_id=%s (status=%s)", entry_id, status_code
+        )
+        return None
+
+    async def sync_batch(self, entries, max_concurrency: int = 10):
+        """Actualiza un batch sin abortarlo cuando falla una entrada."""
+        if max_concurrency < 1:
+            raise ValueError("max_concurrency debe ser mayor o igual a 1")
+
+        semaphore = asyncio.Semaphore(max_concurrency)
+
+        async def sync_one(entry_id, entry):
+            async with semaphore:
+                try:
+                    return entry_id, await self.sync_data(entry_id, entry), None
+                except Exception as exc:
+                    return entry_id, None, exc
+
+        results = await asyncio.gather(
+            *(sync_one(entry_id, entry) for entry_id, entry in entries)
+        )
+
+        summary = {"processed": 0, "closed": 0, "failed": 0}
+        for entry_id, result, exc in results:
+            if exc is not None:
+                summary["failed"] += 1
+                logger.error("Error actualizando entry_id=%s: %s", entry_id, exc)
+            elif result == 410:
+                summary["processed"] += 1
+                summary["closed"] += 1
+            elif isinstance(result, dict):
+                summary["processed"] += 1
+            else:
+                summary["failed"] += 1
+
+        return summary

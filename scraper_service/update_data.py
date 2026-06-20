@@ -17,6 +17,7 @@ from scraper_service.storage.storage import CSVStorage
 from scraper_service.sync.sync import Synchronizer
 from scraper_service.updater.updater import Updater
 from scraper_service.updater.samplers import PoissonSampler, NormalSampler
+from scraper_service.updater.dataSource import ScrappingDataSource
 
 logger = logging.getLogger(__name__)
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -53,15 +54,19 @@ async def run_argenprop_job(
     *,
     csv_path: str,
     url_base: str,
-    updater: Updater,
 ):
     logger.info("Iniciando job ArgenProp. csv_path=%s", csv_path)
     storage = CSVStorage(csv_path)
     sync = Synchronizer(storage=storage)
     scraper = ArgenPropScraper(
-        headless=env_flag("HEADLESS", True),
+        headless=env_flag("HEADLESS", False),
         url_base=url_base,
         download_images=False,
+        use_api_details=False,
+    )
+    updater = Updater(
+        synchronizer=sync,
+        data_source=ScrappingDataSource(scraper),
     )
 
     job = RoutineJob(
@@ -150,11 +155,9 @@ async def backfill_active_field_from_aviso(
 
 
 async def main():
-    updater = Updater()
     await run_argenprop_job(
         csv_path=str(RAW_DATA_DIR / "arg_venta_data.csv"),
         url_base="https://www.argenprop.com",
-        updater=updater,
     )
 
 

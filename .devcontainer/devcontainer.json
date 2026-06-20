@@ -6,6 +6,11 @@
 		"context": "../scraper_service"
 	},
 
+	"features": {
+		"ghcr.io/devcontainers/features/node":
+		{"version": "lts"}
+	},
+	
 	"containerEnv": {
 		"PLAYWRIGHT_USER_DATA_DIR": "/runtime/playwright-user-data",
 		"SCRAPER_STORAGE_DIR": "/runtime/storage"

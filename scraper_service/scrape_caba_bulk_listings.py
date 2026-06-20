@@ -7,7 +7,6 @@ from scraper_service.routine_job.routine_job import RoutineJob
 from scraper_service.scraper.argenprop_scraper import ArgenPropScraper
 from scraper_service.storage.storage import CSVStorage
 from scraper_service.sync.sync import Synchronizer
-from scraper_service.updater.updater import Updater
 
 
 def env_flag(name: str, default: bool) -> bool:
@@ -46,18 +45,16 @@ def build_argenprop_url(barrio: str, min_m2: int | None = None, max_m2: int | No
 
 async def run_job(url, csv_path, n_pages=5, max_existing_hits=30):
     scraper = ArgenPropScraper(
-        headless=env_flag("HEADLESS", True),
+        headless=env_flag("HEADLESS", False),
         url_base=url,
         download_images=False,
     )
     storage = CSVStorage(csv_path)
     sync_data = Synchronizer(storage=storage)
-    updater = Updater()
 
     routine_job = RoutineJob(
         storage=storage,
         scraper=scraper,
-        updater=updater,
         synchronizer=sync_data,
     )
     try:
